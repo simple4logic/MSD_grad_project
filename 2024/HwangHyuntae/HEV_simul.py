@@ -1,3 +1,5 @@
+## Model based on MQ4
+
 import numpy as np
 import math as m
 
@@ -60,13 +62,18 @@ def eta_function(w, T):
 ## both Voc and R_0 can be obatained from the pack supplier!!
 # return cell open circuit voltage
 def V_oc(SoC_t):
-    volt = 0;
-    return volt;
+    V_max = 12.85 # @ 100%
+    V_min = 11.65 # @ 0&
+    current_Voc = V_min + (V_max - V_min) * SoC_t
+    return current_Voc
 
-# return internal resistance
+# return internal resistance (mΩ)
+# agm80ah model
 def R_0(SoC_t):
-    resist = 0;
-    return resist
+    soc_values = [0, 20, 40, 60, 80, 100]  # SoC in percentage
+    resistance_values = [10, 8, 6, 5, 4, 3]  # Internal resistance in mΩ
+    resistance = np.interp(SoC_t, soc_values, resistance_values)
+    return resistance
 
 #-------------------------
 # return slip angular speed
@@ -96,7 +103,7 @@ def eta_transmission(n_gear, T_trans, w_trans):
 
 
 # Define a function to update the vehicle states based on control inputs
-def update_vehicle_states(T_eng, T_bsg, T_brk, SoC, v_veh, d_rem, v_lim):
+def update_vehicle_states(T_eng, T_bsg, T_brk, SoC, v_veh):
     # random init
     n_g = 1 # gear number from where # it is also time variant
     stop = 0
@@ -136,7 +143,6 @@ def update_vehicle_states(T_eng, T_bsg, T_brk, SoC, v_veh, d_rem, v_lim):
     else:
         print("wrong value : w_p is below 0")
 
-
     # 5. Transmission Model
     w_out = v_veh / R_w
     w_trans = tau_fdr * w_out
@@ -149,21 +155,21 @@ def update_vehicle_states(T_eng, T_bsg, T_brk, SoC, v_veh, d_rem, v_lim):
     else:
         T_out /= eta_transmission(n_g, T_trans, w_trans)
 
-
     # 6. Vehicle Longitudinal Dynamics Model
-    a_veh = ((T_out - T_brk) / (M * R_w)) \
-            - (0.5 * C_d * rho_a * A_f * v_veh**2) / M \
-            - g * C_r * m.cos(alpha) * v_veh \
-            - g * m.sin(alpha)
+    # a_veh = ((T_out - T_brk) / (M * R_w)) \
+    #         - (0.5 * C_d * rho_a * A_f * v_veh**2) / M \
+    #         - g * C_r * m.cos(alpha) * v_veh \
+    #         - g * m.sin(alpha)
 
     # Update velocity and position
-    v_veh = max(0, v_veh + a_veh * time_step)  # Ensure velocity is non-negative
-    d_rem = max(0, d_rem - v_veh * time_step)  # Ensure distance is non-negative
+    # v_veh = max(0, v_veh + a_veh * time_step)  # Ensure velocity is non-negative
+    # remain distance
+    # d_rem = max(0, d_rem - v_veh * time_step)  # Ensure distance is non-negative
 
-    return SoC, v_veh, d_rem
+    return SoC, m_fuel_dot
 
 
-
+## WILL NOT BE USED
 # Calculate traffic light and road segment dynamics
 def update_traffic_states(v_veh, d_tfc, d_prime_lim, t_s, t_e):
     # Update distances to traffic light and speed limit change
