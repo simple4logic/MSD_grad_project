@@ -10,13 +10,13 @@ time_step = 1  # Time step in seconds
 ## init by myself (OK)
 SoC = 0.5  # Initial battery state of charge
 v_veh = 0.0  # Initial vehicle velocity (m/s)
-v_lim = 20.0  # Speed limit at current segment (m/s)
-v_prime_lim = 30.0  # Upcoming speed limit (m/s)
-t_s = 0  # Time to the start of next green light
-t_e = 0  # Time to the end of next green light
-d_tfc = 1000  # Distance to the upcoming traffic light (m)
-d_prime_lim = 500  # Distance to the segment with new speed limit (m)
-d_rem = 10000  # Remaining distance of the trip (m)
+# v_lim = 20.0  # Speed limit at current segment (m/s)
+# v_prime_lim = 30.0  # Upcoming speed limit (m/s)
+# t_s = 0  # Time to the start of next green light
+# t_e = 0  # Time to the end of next green light
+# d_tfc = 1000  # Distance to the upcoming traffic light (m)
+# d_prime_lim = 500  # Distance to the segment with new speed limit (m)
+# d_rem = 10000  # Remaining distance of the trip (m)
 
 w_eng = 0 # 0 at the very first stage
 w_tc = 0
