@@ -22,14 +22,7 @@ w_eng = 0 # 0 at the very first stage
 w_tc = 0
 
 # Vehicle and powertrain model parameters
-## init PARAMs
-M = 1500  # Vehicle mass (kg)
 R_w = 0.3  # Wheel radius (m)
-g = 9.81  # Gravitational constant (m/s^2)
-C_d = 0.3  # Aerodynamic drag coefficient
-rho_a = 1.225  # Air density (kg/m^3)
-A_f = 2.5  # Frontal area (m^2)
-C_r = 0.01  # Rolling resistance coefficient
 
 ## not sure params
 tau_belt = 1            # belt ratio
