@@ -149,6 +149,27 @@ class HEV(gym.Env):
         T_eng_max = 9.81 * T_eng_max # N·m
 
         return T_eng_max
+    
+    # 전기모터 최대 토크 함수 (입력: rpm, scalar)
+    def get_motor_max_torque(self, w_eng):
+        rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
+        T_motor_max = 150.0  # 최대 전기모터 토크 (Nm)
+        threshold = 2000.0   # rpm threshold
+        if rpm_eng <= threshold:
+            return T_motor_max
+        else:
+            return T_motor_max * math.exp(-(rpm_eng - threshold) / 1000.0)
+
+    # 회생제동 토크 모델 (입력: rpm, scalar)
+    def get_motor_max_break(self, w_eng):
+        rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
+        T_max_regen = 80.0    # 최대 회생제동 토크 (양수값; 실제 토크는 음수)
+        threshold = 2000.0    # 일정 rpm 이하에서는 최대 회생토크 유지
+        decay_factor = 1000.0 # 지수 감소율
+        if rpm_eng <= threshold:
+            return -T_max_regen
+        else:
+            return -T_max_regen * math.exp(-(rpm_eng - threshold) / decay_factor)
 
     ## vehicle modeling
     # Define a function to update the vehicle states based on control inputs
@@ -229,21 +250,33 @@ class HEV(gym.Env):
 
     # Define a function to split the power between the engine and the BSG
     def power_split_HCU(self, ratio, SoC, T_req, w_eng):
-        
         # 1. Clip the ratio to the realistic range [0, 1]
         real_ratio = max(min(ratio, 1.0), 0.0)
         
         # 2. Compute maximum engine torque from current w_eng(rad/s)
         T_max_eng = self.get_engine_max_torque(w_eng)
+        T_max_bsg = self.get_motor_max_torque(w_eng)
+        T_max_regen = self.get_motor_max_break(w_eng)
 
-        # 3. Enforce battery SoC constraint: if SoC is low (<20), force full engine torque.
-        if SoC < 20:
+        # 3. Enforce battery SoC constraint: if SoC is low (<0.2), force full engine torque.
+        if SoC < 0.2:
             T_eng = T_max_eng # 일부로 max로 넣어서, soc를 회생제동 시킴 -> 충전
         else:
             T_eng = T_max_eng * real_ratio
 
         # 4. Compute BSG torque requirement
         T_bsg = T_req - T_eng
+
+        if(T_bsg > 0): # 배터리 소모
+            if(T_bsg > T_max_bsg): # BSG 토크가 낼 수 있는 최대치 넘어가는지 확인
+                T_bsg = T_max_bsg
+                T_eng = T_req - T_bsg # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
+            #else : do nothing
+        else: # T_bsg < 0, 회생제동, 충전전
+            if(T_bsg < T_max_regen): # BSG 충전 역토크의 최대치를 넘어가는지 확인
+                T_bsg = T_max_regen
+                T_eng = T_req - T_bsg
+            #else : do nothing
 
         # 5. Enforce engine on/off switching constraints:
         ## TODO 엔진토크가 0보다 커지면 engine ON / 2.5초내로 engine의 on off를 바꾸는건 불가능함 (있으면 좋은 것)

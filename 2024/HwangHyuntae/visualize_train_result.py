@@ -27,10 +27,10 @@ fig, ax1 = plt.subplots(figsize=(10, 5))
 
 # 왼쪽 y축: T_eng와 T_bsg 플롯
 ax1.plot(times, T_eng, label="T_eng", color="blue")
-# ax1.plot(times, T_bsg, label="T_bsg", color="purple")
+ax1.plot(times, T_bsg, label="T_bsg", color="purple")
 # plt.plot(times, T_req, label="T_req", color="green")
-plt.plot(times, T_eng_max, label="T_eng_max", color="red")
-plt.plot(times, prev_w_eng, label="prev_w_eng", color="green")
+# plt.plot(times, T_eng_max, label="T_eng_max", color="red")
+# plt.plot(times, prev_w_eng, label="prev_w_eng", color="green")
 # plt.plot(times, soc_reward, label="soc_reward", color="blue")
 # plt.plot(times, fuel_reward, label="fuel_reward", color="green")
 # plt.plot(times, fuel_dot_values, label="Fuel Dot", color="red")
@@ -40,7 +40,7 @@ ax1.tick_params(axis="y", labelcolor="black")
 
 # 오른쪽 y축: SoC 플롯
 ax2 = ax1.twinx()
-# ax2.plot(times, soc_values, label="SoC", color="red")
+ax2.plot(times, soc_values, label="SoC", color="red")
 ax2.set_ylabel("State of Charge (SoC)", color="black")
 ax2.tick_params(axis="y", labelcolor="black")
 
