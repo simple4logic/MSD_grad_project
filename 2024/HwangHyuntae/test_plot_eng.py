@@ -14,7 +14,7 @@ def torque_rpm(x):
     if x < 0:
         raise ValueError("x는 양수여야 합니다.")
     A = 2000  # 최대값 위치 (1450과 3500 사이의 임의 값)
-    return 36 * (x / A) * math.exp(1 - x / A)
+    return 36 * (x / A) * math.exp(1 - x / A) * 9.81
 
 # RPM 범위 생성
 rpm_values = np.linspace(0, 8000, 600)
