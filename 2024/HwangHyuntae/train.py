@@ -7,7 +7,7 @@ from stable_baselines3.common.callbacks import CallbackList
 from env import HEV
 
 start_time = 0
-step_size = 1
+step_size = 1 # 1초단위
 config = None
 stop_time = 1800
 total_timesteps = int(stop_time)

@@ -5,3 +5,6 @@ wltp_1Hz.csv
 __pycache__/
 *.zip
 *.json
+assets/
+issues.md
+
