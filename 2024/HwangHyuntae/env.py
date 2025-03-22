@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import pandas as pd
 import gymnasium as gym
@@ -20,8 +21,8 @@ class MQ4: ## car_config
     I_aux = 0.0         # auxiliary current (A) // assume none
     # I_bias = 1          # constant current bias
     # alpha = 1           # road grade (slope of the road)  ## time variant, depends on the road condition
-    w_stall = 500       # minimum engine speed not to stall
-    w_idle = 80         # speed without giving any power
+    w_stall = 52.36     # minimum engine speed not to stall // rad/s
+    w_idle = 8.38       # speed without giving any power // rad/s
 
 
 class HEV(gym.Env):
@@ -37,10 +38,10 @@ class HEV(gym.Env):
         self.stop_time = self.vehicle_speed_profile.shape[0] - 1
 
         # number of observable states
-        # we use soc, fuel_dot, prev_v_veh
+        # we use soc, fuel_dot, prev_v_veh, prev_w_eng
         self.state_init = np.array([self.soc_init, 0, 0, 0], dtype=np.float64)
         self.soc_base = 70/100
-        self.actsize = 3 # number of possible acctions
+        self.actsize = 3 # number of possible actions
 
         self.state = self.state_init
         self.obssize = len(self.state)
@@ -79,7 +80,7 @@ class HEV(gym.Env):
         soc_values = [0, 0.2, 0.4, 0.6, 0.8, 1]  # SoC in percentage
         resistance_values = [10, 8, 6, 5, 4, 3]  # Internal resistance in mΩ
         resistance = np.interp(SoC_t, soc_values, resistance_values)
-        return resistance
+        return resistance / 1000 # return in ohm
     
     # take w_eng and T_eng as input
     # return fuel consumption rate
@@ -92,42 +93,36 @@ class HEV(gym.Env):
         m_dot = (w * T) / (eff * LHV) 
         return m_dot
     
-    def gear_number(self, v_veh):
-        if v_veh < 15:
+    def gear_number(self, v_veh): # 후진 고려 X
+        if v_veh < 6: # ~25 km/h
             return 1
-        elif v_veh < 30:
+        elif v_veh < 12: # ~50 km/h
             return 2
-        elif v_veh < 50:
+        elif v_veh < 18: # ~75 km/h
             return 3
-        elif v_veh < 70:
+        elif v_veh < 25: # ~100 km/h
             return 4
-        elif v_veh < 90:
+        elif v_veh < 33: # ~120 km/h
             return 5
-        elif v_veh < 110:
+        else: # bigger than 33 (130 km/h ~)
             return 6
-        elif v_veh < 140:
-            return 7
-        else:
-            return 8
 
     # get gear ratio using gear number
-    ## TODO - 더 정확한 referecne 필요. + 8단 -> 6단으로 수정 필요
     def gear_ratio(self, n_gear):
         tau_gear = {
-            1: 4.808,
-            2: 2.901,
-            3: 1.864,
-            4: 1.424,
-            5: 1.219,
-            6: 1.000,
-            7: 0.799,
-            8: 0.648
+            1: 4.639,
+            2: 2.826,
+            3: 1.841,
+            4: 1.386,
+            5: 1.000,
+            6: 0.772,
         }
         return tau_gear[n_gear]
     
     # return slip angular speed
     # take gear number, w_eng, T_eng
     # engine <-> transmission slip speed
+    ## 상용 데이터 일단 사용하는 방식으로
     def slip_speed(self, n_gear, w_eng, T_eng):
         ## TODO : slip speed 계산
         omega_slip = 0 # temp value
@@ -145,12 +140,21 @@ class HEV(gym.Env):
         eff = 0.9
         return eff
     
+    ## take rpm and return maximum available torque
+    def get_engine_max_torque(self, w_eng):
+        rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
+
+        A = 2000  # 최대값 위치 (1450과 3500 사이의 임의 값)
+        T_eng_max = 36 * (rpm_eng / A) * math.exp(1 - rpm_eng / A) # Kg·m
+        T_eng_max = 9.81 * T_eng_max # N·m
+
+        return T_eng_max
+
     ## vehicle modeling
     # Define a function to update the vehicle states based on control inputs
-    def update_vehicle_states(self, T_eng, T_bsg, SoC, v_veh, w_eng, stop=False):
+    def update_vehicle_states(self, n_g, T_eng, T_bsg, SoC, v_veh, w_eng, stop=False):
         car = self.car_config # load config
-        n_g = self.gear_number(v_veh) # it is also time variant # TODO gear ratio 제약조건 -> 매초 1단 밖에 안바뀜
-        
+
         m_fuel_dot = self.engine_modeling(w_eng, T_eng)
 
         w_out = v_veh / car.wheel_R
@@ -187,7 +191,8 @@ class HEV(gym.Env):
         # 3. Battery Model (need function V_oc, R_0 from pack supplier)
         root = self.V_oc(SoC)**2 - 4 * self.R_0(SoC) * P_bsg # verify root >= 0
         I_t = (self.V_oc(SoC) - np.sqrt(root if root >= 0 else 0)) / (2 * self.R_0(SoC))
-        SoC -= (self.step_size / car.C_nom) * (I_t + car.I_aux)
+        # C_nom = Ah이기 때문에 분자도 A * hour 로 통일시켜줌
+        SoC -= ((self.step_size / 3600) * (I_t + car.I_aux)) / car.C_nom
 
         # 4. Torque Converter Model
         T_pt = T_bsg + T_eng # from the figure 2 block diagram
@@ -204,9 +209,7 @@ class HEV(gym.Env):
     
 
     # Define a function to calculate the required torque from acceleration
-    def req_T_calculation(self, v_veh_t, v_veh_t_next, step_size):
-        n_gear = self.gear_number(v_veh_t)
-
+    def req_T_calculation(self, v_veh_t, v_veh_t_next, n_gear, step_size):
         # 가속도 계산
         a_veh = (v_veh_t_next - v_veh_t) / step_size
         car = self.car_config
@@ -221,10 +224,33 @@ class HEV(gym.Env):
         T_wheel = car.Mass * a_veh * car.wheel_R + F_resist * car.wheel_R
         T_req = T_wheel / (self.gear_ratio(n_gear) * car.tau_fdr)
 
-        ## 속도가 줄었을 때 -> engine torque 줄이고, 나머지 minus torque는 motor로 줄이는 식으로
-        ## motor 
-
         return T_req
+    
+
+    # Define a function to split the power between the engine and the BSG
+    def power_split_HCU(self, ratio, SoC, T_req, w_eng):
+        
+        # 1. Clip the ratio to the realistic range [0, 1]
+        real_ratio = max(min(ratio, 1.0), 0.0)
+        
+        # 2. Compute maximum engine torque from current w_eng(rad/s)
+        T_max_eng = self.get_engine_max_torque(w_eng)
+
+        # 3. Enforce battery SoC constraint: if SoC is low (<20), force full engine torque.
+        if SoC < 20:
+            T_eng = T_max_eng # 일부로 max로 넣어서, soc를 회생제동 시킴 -> 충전
+        else:
+            T_eng = T_max_eng * real_ratio
+
+        # 4. Compute BSG torque requirement
+        T_bsg = T_req - T_eng
+
+        # 5. Enforce engine on/off switching constraints:
+        ## TODO 엔진토크가 0보다 커지면 engine ON / 2.5초내로 engine의 on off를 바꾸는건 불가능함 (있으면 좋은 것)
+        ## engine on off 마다 reward 를 줄수도 있긴 한데 좀 까다로울 수도 있음
+        ## engine을 키면 한N(~3)초 정도는 다시 토크를 0 으로 설정하는건 불가능하게 제약 필요 **
+
+        return T_eng, T_bsg
 
 
     #------------------------- Step function -------------------------- #
@@ -232,63 +258,58 @@ class HEV(gym.Env):
     # t-state를 받아서 t+1 state를 반환
     def step(self,action):
         '''
-        이전 state에서 속도를 가져오면 prev_vel로 일단 이번 step을 뛰고
-        curr_vel로 바뀌어야 함. 그래서 t_req 계산에 prev->curr 로 바뀌도록 하는 토크임
+        이번 step은 prev_v_veh로 뛰고 다음 step은 curr_v_veh로 뛰고 싶은 상황
+        따라서 T_req 토크를 통해서 속도가 prev->curr 로 바뀌도록 함
+        process : gear 계산 -> T_req 계산 -> HCU(동력분배) -> 차량 state update -> reward 계산
         '''
-        #----------------------------- state unpacking phase ------------------------ #
+        #----------------------------- 0. state unpacking phase ------------------------ #
         # get state values from t state
-        ## two goal : SoC, fuel_dot
+        # 이번 스텝에서 뛸 속도 prev_v, 다음 스텝에서 뛸 curr_v를 goal로 전달
         SoC_t0, fuel_dot_t0, prev_v_veh, prev_w_eng = self.state
-        current_v_veh = self.vehicle_speed_profile[int(self.time)] # 이 속도로 바뀌어야만 함
+        current_v_veh = self.vehicle_speed_profile[int(self.time)] / 3.6 # 목표 속도 (km/h -> m/s)
 
-        #-------------------- --------- action unpacking phase ------------------------ #
-        # get Torque value from action (input)
-        ## 현재 시점에 필요한 토크 prev->curr로 바뀌기 위해 필요한 토크
-        T_req = self.req_T_calculation(prev_v_veh, current_v_veh, self.step_size) ##TODO gear 단수를 state에?
-        
-        ## max torque에 대한 비율
-        ## TODO 넣어준 action에 대한 함수로 작성
-        ## eng max torque -> const
-        ## motor max torque -> variable
+        #-------------------------- 1. request Torque calculation --------------------- #
+        ## 현재 시점에 필요한 토크 prev->curr로 바뀌기 위해 필요한 토크 계산
+        # 먼저 현재 step에서 뛸 속도로부터 기어를 결정 (0.2초당 1번 기어 변경 가능 -> 제약 조건 따로 X)
+        n_gear = self.gear_number(prev_v_veh)
 
-        ## eng, bsg -> action 대한 함수
-        # T_eng, T_bsg = action ## 범위 -1 ~ 1
-        ratio = action
-        T_eng = T_req * ratio
-        T_bsg = T_req * (1 - ratio)
+        # 기어 결정 이후 request torque 계산
+        T_req = self.req_T_calculation(prev_v_veh, current_v_veh, n_gear, self.step_size)
 
-        ## T_brk -> 제거
-        ## T_req = Teng + Tbsg
+        #-------------------------------- 2. HCU phase -------------------------------- #
+        ## HCU 동력분배 - action과 state를 받아서 T_eng, T_bsg 결정
+        # 여기서 만들어진 T_eng, T_bsg는 반드시 내야한다
+        ratio = action # action unpack (확장 가능)
+        T_eng, T_bsg = self.power_split_HCU(ratio, SoC_t0, T_req, prev_w_eng)
 
-        ## (T_eng + T_bsg) => T_out
-        ## T_out(모터 + ) - T_brk  / ~ => a_veh
-
-        #----------------------------- modeling phase ------------------------ #
-        # make state values of t+1 state
-        # prev_v_veh == 현재 시간 차량의 속도
-        # current_v_veh == 다음 시간 차량의 속도
-        SoC_t1, fuel_dot_t1, next_w_eng = self.update_vehicle_states(T_eng, T_bsg, SoC_t0, prev_v_veh, prev_w_eng)
+        #-------------------------------- 3. state update phase -------------------------------- #
+        ## t+1 state의 값들을 계산
+        # prev_v_veh == 현재 시간 차량의 속도, current_v_veh == 다음 시간 차량의 속도
+        SoC_t1, fuel_dot_t1, next_w_eng = self.update_vehicle_states(n_gear, T_eng, T_bsg, SoC_t0, prev_v_veh, prev_w_eng)
 
         #----------------------------- reward definition phase ------------------------ #
         # 새로운 state에 대해서 reward를 계산
         soc_reward = - (abs(self.soc_base - SoC_t1)) ** 2 # 멀어질 수록 더 -가 커짐 // 해보고 exp도 가능
-        fuel_reward = -fuel_dot_t1 # 클수록 안좋음
+        fuel_reward = - fuel_dot_t1 # 클수록 안좋음
 
         #----------------------------- state update phase ------------------------ #
         new_state = np.array([SoC_t1, fuel_dot_t1, current_v_veh, next_w_eng], dtype=np.float64)
         self.state = new_state
 
-        reward = soc_reward + fuel_reward
-
+        reward = soc_reward + fuel_reward # 원하는 target에 따라서 tuning 할 수 있음 reward 에 배치
 
         #--------------------------------- for debugging ------------------------ #
         info = {
-            "time": self.time,  # Current time
-            "SoC": float(self.state[0]),  # Initial battery state of charge
-            "fuel_dot": float(self.state[1]),  # Initial fuel consumption rate
-            "current_speed": float(self.state[2]),  # Initial vehicle speed
-            "current_angular_speed": float(self.state[3]),  # Initial vehicle speed
-            "reward": float(reward),
+            "time"                  : self.time,            # Current time
+            "ratio"                 : ratio,               # Current gear
+            "T_req"                 : float(T_req),         # Requested torque
+            "T_eng"                 : float(T_eng),         # Engine torque
+            "T_bsg"                 : float(T_bsg),         # BSG torque
+            "SoC"                   : float(SoC_t1)*100,    # 이번 스텝 시작 시의 SoC (%)
+            "prev_w_eng"            : float(prev_w_eng),    # 이번 스텝에서 사용한 w_eng
+            "T_eng_max"             : float(self.get_engine_max_torque(prev_w_eng)),    # 이번 스텝에서의 max torque
+            "soc_reward"            : float(soc_reward),
+            "fuel_reward"           : float(fuel_reward),
         }
 
         #--------------------------------- closing phase ------------------------ #
