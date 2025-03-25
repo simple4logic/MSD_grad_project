@@ -173,7 +173,7 @@ class HEV(gym.Env):
 
     ## vehicle modeling
     # Define a function to update the vehicle states based on control inputs
-    def update_vehicle_states(self, n_g, T_eng, T_bsg, SoC, v_veh, w_eng, stop=False):
+    def update_vehicle_states(self, n_g, T_eng, T_bsg, T_brk, SoC, v_veh, w_eng, stop=False):
         car = self.car_config # load config
 
         m_fuel_dot = self.engine_modeling(w_eng, T_eng)
@@ -216,7 +216,7 @@ class HEV(gym.Env):
         SoC -= ((self.step_size / 3600) * (I_t + car.I_aux)) / car.C_nom
 
         # 4. Torque Converter Model
-        T_pt = T_bsg + T_eng # from the figure 2 block diagram
+        T_pt = T_bsg + T_eng - T_brk # from the figure 2 block diagram
         T_tc = T_pt
 
         T_trans = self.gear_ratio(n_g) * T_tc
@@ -254,36 +254,57 @@ class HEV(gym.Env):
         real_ratio = max(min(ratio, 1.0), 0.0)
         
         # 2. Compute maximum engine torque from current w_eng(rad/s)
-        T_max_eng = self.get_engine_max_torque(w_eng)
-        T_max_bsg = self.get_motor_max_torque(w_eng)
-        T_max_regen = self.get_motor_max_break(w_eng)
+        T_max_eng = self.get_engine_max_torque(w_eng)   # positive
+        T_max_bsg = self.get_motor_max_torque(w_eng)    # positive
+        T_max_regen = self.get_motor_max_break(w_eng)   # minus
 
-        # 3. Enforce battery SoC constraint: if SoC is low (<0.2), force full engine torque.
-        if SoC < 0.2:
-            T_eng = T_max_eng # 일부로 max로 넣어서, soc를 회생제동 시킴 -> 충전
-        else:
-            T_eng = T_max_eng * real_ratio
+        ## TODO -> T_brk 를 정의하고 값 할당
+        # T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos)
 
-        # 4. Compute BSG torque requirement
-        T_bsg = T_req - T_eng
+        ## case 1 : 제동 상황 (T_eng is invalid)
+        if(T_req < 0):
+            T_eng = 0 # action과 무관하게 engine off
 
-        if(T_bsg > 0): # 배터리 소모
-            if(T_bsg > T_max_bsg): # BSG 토크가 낼 수 있는 최대치 넘어가는지 확인
-                T_bsg = T_max_bsg
-                T_eng = T_req - T_bsg # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
-            #else : do nothing
-        else: # T_bsg < 0, 회생제동, 충전전
-            if(T_bsg < T_max_regen): # BSG 충전 역토크의 최대치를 넘어가는지 확인
+            # motor regen 제동만으로 충분한 경우
+            if(T_max_regen < T_req):
+                T_bsg = T_req
+                T_brk = 0
+            # motor regen 제동으로는 부족한 경우
+            else:
                 T_bsg = T_max_regen
-                T_eng = T_req - T_bsg
-            #else : do nothing
+                T_brk = T_bsg - T_req
+
+        ## case 2. 가속 상황 (T_eng is valid)
+        else: # T_req >= 0
+            T_brk = 0 # brake 사용할 필요 X
+
+            # 3. T_eng 계산 (Soc 상태 고려)
+            if SoC < 0.2:
+                T_eng = T_max_eng # 일부로 max로 넣어서, soc를 회생제동 시킴 -> 충전
+            else:
+                T_eng = T_max_eng * real_ratio
+
+            # 4. Compute BSG torque requirement
+            T_bsg = T_req - T_eng
+
+            if(T_bsg > 0): # 배터리 소모
+                if(T_bsg > T_max_bsg): # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
+                    T_bsg = T_max_bsg
+                    T_eng = T_req - T_bsg # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
+                #else : do nothing
+            else: # T_bsg < 0, 회생제동, 충전
+                if(T_bsg < T_max_regen): # BSG 충전 역토크의 최대치를 넘어가는 경우
+                    T_bsg = T_max_regen
+                    T_eng = T_req - T_bsg
+                #else : do nothing
+
 
         # 5. Enforce engine on/off switching constraints:
         ## TODO 엔진토크가 0보다 커지면 engine ON / 2.5초내로 engine의 on off를 바꾸는건 불가능함 (있으면 좋은 것)
         ## engine on off 마다 reward 를 줄수도 있긴 한데 좀 까다로울 수도 있음
         ## engine을 키면 한N(~3)초 정도는 다시 토크를 0 으로 설정하는건 불가능하게 제약 필요 **
 
-        return T_eng, T_bsg
+        return T_eng, T_bsg, T_brk
 
 
     #------------------------- Step function -------------------------- #
@@ -313,12 +334,14 @@ class HEV(gym.Env):
         ## HCU 동력분배 - action과 state를 받아서 T_eng, T_bsg 결정
         # 여기서 만들어진 T_eng, T_bsg는 반드시 내야한다
         ratio = action # action unpack (확장 가능)
-        T_eng, T_bsg = self.power_split_HCU(ratio, SoC_t0, T_req, prev_w_eng)
+
+        # T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos)
+        T_eng, T_bsg, T_brk = self.power_split_HCU(ratio, SoC_t0, T_req, prev_w_eng)
 
         #-------------------------------- 3. state update phase -------------------------------- #
         ## t+1 state의 값들을 계산
         # prev_v_veh == 현재 시간 차량의 속도, current_v_veh == 다음 시간 차량의 속도
-        SoC_t1, fuel_dot_t1, next_w_eng = self.update_vehicle_states(n_gear, T_eng, T_bsg, SoC_t0, prev_v_veh, prev_w_eng)
+        SoC_t1, fuel_dot_t1, next_w_eng = self.update_vehicle_states(n_gear, T_eng, T_bsg, T_brk, SoC_t0, prev_v_veh, prev_w_eng)
 
         #----------------------------- reward definition phase ------------------------ #
         # 새로운 state에 대해서 reward를 계산
