@@ -14,7 +14,7 @@ def get_engine_max_torque_scalar(w_eng):
 
 # 전기모터 최대 토크 함수 (입력: rpm, scalar)
 def get_motor_max_torque_scalar(rpm):
-    T_motor_max = 150.0  # 최대 전기모터 토크 (Nm)
+    T_motor_max = 280.0  # 최대 전기모터 토크 (Nm)
     threshold = 2000.0   # rpm threshold
     if rpm <= threshold:
         return T_motor_max
@@ -23,7 +23,7 @@ def get_motor_max_torque_scalar(rpm):
 
 # 회생제동 토크 모델 (입력: rpm, scalar)
 def get_motor_max_break_scalar(rpm):
-    T_max_regen = 80.0    # 최대 회생제동 토크 (양수값; 실제 토크는 음수)
+    T_max_regen = 180.0    # 최대 회생제동 토크 (양수값; 실제 토크는 음수)
     threshold = 2000.0    # 일정 rpm 이하에서는 최대 회생토크 유지
     decay_factor = 1000.0 # 지수 감소율
     if rpm <= threshold:

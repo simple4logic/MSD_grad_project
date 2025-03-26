@@ -17,7 +17,7 @@ class MQ4: ## car_config
     roll_coeff = 0.015  # Rolling resistance coefficient
     tau_belt = 1        # belt ratio
     tau_fdr = 3.5       # final drive ratio
-    C_nom = 50000.0     # capacity of the battery (Ah)
+    battery_cap = 1.5   # capacity of the battery (kWh)
     I_aux = 0.0         # auxiliary current (A) // assume none
     # I_bias = 1          # constant current bias
     # alpha = 1           # road grade (slope of the road)  ## time variant, depends on the road condition
@@ -153,7 +153,8 @@ class HEV(gym.Env):
     # 전기모터 최대 토크 함수 (입력: rpm, scalar)
     def get_motor_max_torque(self, w_eng):
         rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
-        T_motor_max = 150.0  # 최대 전기모터 토크 (Nm)
+
+        T_motor_max = 280.0  # 최대 전기모터 토크 (Nm)
         threshold = 2000.0   # rpm threshold
         if rpm_eng <= threshold:
             return T_motor_max
@@ -163,6 +164,7 @@ class HEV(gym.Env):
     # 회생제동 토크 모델 (입력: rpm, scalar)
     def get_motor_max_break(self, w_eng):
         rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
+
         T_max_regen = 80.0    # 최대 회생제동 토크 (양수값; 실제 토크는 음수)
         threshold = 2000.0    # 일정 rpm 이하에서는 최대 회생토크 유지
         decay_factor = 1000.0 # 지수 감소율
@@ -213,7 +215,9 @@ class HEV(gym.Env):
         root = self.V_oc(SoC)**2 - 4 * self.R_0(SoC) * P_bsg # verify root >= 0
         I_t = (self.V_oc(SoC) - np.sqrt(root if root >= 0 else 0)) / (2 * self.R_0(SoC))
         # C_nom = Ah이기 때문에 분자도 A * hour 로 통일시켜줌
-        SoC -= ((self.step_size / 3600) * (I_t + car.I_aux)) / car.C_nom
+        SoC -= ((self.step_size / 3600) * (I_t + car.I_aux)) / (car.battery_cap * 1000) # Wh / Wh -> %
+        ## TODO -> 배터리 용량 고려해서  + capcacity 바꿔주면서 50 ~ 90 까지는 가도록
+        ## 31.25 V 정도?
 
         # 4. Torque Converter Model
         T_pt = T_bsg + T_eng - T_brk # from the figure 2 block diagram
@@ -250,6 +254,8 @@ class HEV(gym.Env):
 
     # Define a function to split the power between the engine and the BSG
     def power_split_HCU(self, ratio, SoC, T_req, w_eng):
+        #** T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos) **#
+
         # 1. Clip the ratio to the realistic range [0, 1]
         real_ratio = max(min(ratio, 1.0), 0.0)
         
@@ -258,31 +264,27 @@ class HEV(gym.Env):
         T_max_bsg = self.get_motor_max_torque(w_eng)    # positive
         T_max_regen = self.get_motor_max_break(w_eng)   # minus
 
-        ## TODO -> T_brk 를 정의하고 값 할당
-        # T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos)
+        # 3. T_eng 계산 (Soc 상태 고려)
+        if SoC < 0.2:
+            T_eng = T_max_eng # 일부로 max로 넣어서, soc를 회생제동 시킴 -> 충전
+        else:
+            T_eng = T_max_eng * real_ratio
 
-        ## case 1 : 제동 상황 (T_eng is invalid)
+
+        ## case 1 : 제동 상황
         if(T_req < 0):
-            T_eng = 0 # action과 무관하게 engine off
-
-            # motor regen 제동만으로 충분한 경우
-            if(T_max_regen < T_req):
-                T_bsg = T_req
+            # motor regen 제동만으로 충분한 경우 (T_max_regen 크기 > required)
+            if(T_max_regen < (T_req - T_eng)):
+                T_bsg = T_req - T_eng
                 T_brk = 0
             # motor regen 제동으로는 부족한 경우
             else:
                 T_bsg = T_max_regen
-                T_brk = T_bsg - T_req
+                T_brk = (T_eng + T_bsg) - T_req
 
-        ## case 2. 가속 상황 (T_eng is valid)
+        ## case 2. 가속 상황
         else: # T_req >= 0
             T_brk = 0 # brake 사용할 필요 X
-
-            # 3. T_eng 계산 (Soc 상태 고려)
-            if SoC < 0.2:
-                T_eng = T_max_eng # 일부로 max로 넣어서, soc를 회생제동 시킴 -> 충전
-            else:
-                T_eng = T_max_eng * real_ratio
 
             # 4. Compute BSG torque requirement
             T_bsg = T_req - T_eng
@@ -291,7 +293,7 @@ class HEV(gym.Env):
                 if(T_bsg > T_max_bsg): # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
                     T_bsg = T_max_bsg
                     T_eng = T_req - T_bsg # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
-                #else : do nothing
+                #else : do nothing 
             else: # T_bsg < 0, 회생제동, 충전
                 if(T_bsg < T_max_regen): # BSG 충전 역토크의 최대치를 넘어가는 경우
                     T_bsg = T_max_regen
