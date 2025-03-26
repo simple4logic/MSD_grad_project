@@ -156,16 +156,17 @@ class HEV(gym.Env):
 
         T_motor_max = 280.0  # 최대 전기모터 토크 (Nm)
         threshold = 2000.0   # rpm threshold
+        decay_factor = 1000.0 # 지수 감소율
         if rpm_eng <= threshold:
             return T_motor_max
         else:
-            return T_motor_max * math.exp(-(rpm_eng - threshold) / 1000.0)
+            return T_motor_max * math.exp(-(rpm_eng - threshold) / decay_factor)
 
     # 회생제동 토크 모델 (입력: rpm, scalar)
     def get_motor_max_break(self, w_eng):
         rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
 
-        T_max_regen = 80.0    # 최대 회생제동 토크 (양수값; 실제 토크는 음수)
+        T_max_regen = 280.0    # 최대 회생제동 토크 (양수값; 실제 토크는 음수)
         threshold = 2000.0    # 일정 rpm 이하에서는 최대 회생토크 유지
         decay_factor = 1000.0 # 지수 감소율
         if rpm_eng <= threshold:
@@ -297,7 +298,7 @@ class HEV(gym.Env):
             else: # T_bsg < 0, 회생제동, 충전
                 if(T_bsg < T_max_regen): # BSG 충전 역토크의 최대치를 넘어가는 경우
                     T_bsg = T_max_regen
-                    T_eng = T_req - T_bsg
+                    T_brk = T_bsg + T_eng - T_req
                 #else : do nothing
 
 
