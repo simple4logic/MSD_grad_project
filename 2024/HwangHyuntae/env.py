@@ -7,6 +7,7 @@ import gymnasium as gym
 profile_name = 'wltp_1Hz.csv' # wltp cycle (value fixed)
 
 ## 23년식 가솔린 터보 1.6 하이브리드 2WD / 5인승
+## https://www.kiamedia.com/us/en/models/sorento-hev/2023/specifications
 class MQ4: ## car_config
     Mass = 1775         # Vehicle mass (kg)
     wheel_R = 0.3       # Wheel radius (m)
@@ -71,22 +72,26 @@ class HEV(gym.Env):
     #------------------------- car modeling functions and logics ------------------------ #
     #battery model : agm80ah
     def V_oc(self, SoC_t):
-        V_max = 12.85 # @ 100%
-        V_min = 11.65 # @ 0%
-        current_Voc = V_min + (V_max - V_min) * SoC_t
-        return current_Voc
+        SoC_t = np.clip(SoC_t, 0.0, 1.0)
+        if SoC_t <= 0.3:
+            # 0.0 ~ 0.3 → 15V → 28V
+            cell_voltage = 15.0 + (SoC_t / 0.3) * (28.0 - 15.0)
+        else:
+            # 0.3 ~ 1.0 → 28V → 36V
+            cell_voltage = 28.0 + ((SoC_t - 0.3) / 0.7) * (36.0 - 28.0)
+        
+        return cell_voltage * 9 # 9 cells in series
     
     def R_0(self, SoC_t):
-        soc_values = [0, 0.2, 0.4, 0.6, 0.8, 1]  # SoC in percentage
-        resistance_values = [10, 8, 6, 5, 4, 3]  # Internal resistance in mΩ
-        resistance = np.interp(SoC_t, soc_values, resistance_values)
-        return resistance / 1000 # return in ohm
+        internal_resistance = 0.009194 / (SoC_t + 0.999865) + 0.000001 # 1 cell
+        total_resistance = 9 * internal_resistance # total 9 cell
+        return total_resistance
     
     # take w_eng and T_eng as input
     # return fuel consumption rate
     # TODO BSFG map을 써서 적용
-    # g/(kWh) -> km/L 연비 계산 가능
     # reward 
+    # g/(kWh) -> km/L 연비 계산 가능
     def engine_modeling(self, w, T):
         LHV = 44e6 #LHV of gasoline, 44MJ/kg(while diesel is 42.5 MJ/kg)
         eff = 0.25 # usually 25% for gasoline
@@ -216,9 +221,15 @@ class HEV(gym.Env):
         root = self.V_oc(SoC)**2 - 4 * self.R_0(SoC) * P_bsg # verify root >= 0
         I_t = (self.V_oc(SoC) - np.sqrt(root if root >= 0 else 0)) / (2 * self.R_0(SoC))
         # C_nom = Ah이기 때문에 분자도 A * hour 로 통일시켜줌
-        SoC -= ((self.step_size / 3600) * (I_t + car.I_aux)) / (car.battery_cap * 1000) # Wh / Wh -> %
-        ## TODO -> 배터리 용량 고려해서  + capcacity 바꿔주면서 50 ~ 90 까지는 가도록
-        ## 31.25 V 정도?
+        battey_voltage = 270
+        DIFF = ((self.step_size / 3600) * battey_voltage * (I_t + car.I_aux)) / (car.battery_cap * 1000)
+        SoC -= DIFF # Wh / Wh -> %
+        # print("---------------------------------------------------------------------")
+        # print("T_bsg : ", T_bsg, "w_bsg : ", w_bsg)
+        # print("P_bsg : ", P_bsg)
+        # print(f"current : {I_t}, resistance : {self.R_0(SoC)}, voltage : {self.V_oc(SoC)}")
+        # print("SoC : ", SoC, "DIFF : ", DIFF)
+        # print("")
 
         # 4. Torque Converter Model
         T_pt = T_bsg + T_eng - T_brk # from the figure 2 block diagram
@@ -275,13 +286,17 @@ class HEV(gym.Env):
         ## case 1 : 제동 상황
         if(T_req < 0):
             # motor regen 제동만으로 충분한 경우 (T_max_regen 크기 > required)
-            if(T_max_regen < (T_req - T_eng)):
-                T_bsg = T_req - T_eng
-                T_brk = 0
-            # motor regen 제동으로는 부족한 경우
-            else:
-                T_bsg = T_max_regen
-                T_brk = (T_eng + T_bsg) - T_req
+            if SoC >= 1.0: # 배터리 완충
+                T_bsg = 0 # 회생제동 절대 X
+                T_brk = T_eng - T_req
+            else: # 배터리 충전 가능
+                if(T_max_regen < (T_req - T_eng)):
+                    T_bsg = T_req - T_eng
+                    T_brk = 0
+                # motor regen 제동으로는 부족한 경우
+                else:
+                    T_bsg = T_max_regen
+                    T_brk = (T_eng + T_bsg) - T_req
 
         ## case 2. 가속 상황
         else: # T_req >= 0
@@ -296,10 +311,14 @@ class HEV(gym.Env):
                     T_eng = T_req - T_bsg # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
                 #else : do nothing 
             else: # T_bsg < 0, 회생제동, 충전
-                if(T_bsg < T_max_regen): # BSG 충전 역토크의 최대치를 넘어가는 경우
-                    T_bsg = T_max_regen
-                    T_brk = T_bsg + T_eng - T_req
-                #else : do nothing
+                if SoC >= 1.0: # 배터리 완충 (충전 불가)
+                   T_bsg = 0
+                   T_eng = T_req
+                else:  # 충전 가능
+                    if(T_bsg < T_max_regen): # BSG 충전 역토크의 최대치를 넘어가는 경우
+                        T_bsg = T_max_regen
+                        T_brk = T_bsg + T_eng - T_req
+                    #else : do nothing
 
 
         # 5. Enforce engine on/off switching constraints:
@@ -348,8 +367,8 @@ class HEV(gym.Env):
 
         #----------------------------- reward definition phase ------------------------ #
         # 새로운 state에 대해서 reward를 계산
-        soc_reward = - (abs(self.soc_base - SoC_t1)) ** 2 # 멀어질 수록 더 -가 커짐 // 해보고 exp도 가능
-        fuel_reward = - fuel_dot_t1 # 클수록 안좋음
+        soc_reward = - ((abs(self.soc_base - SoC_t1))**2)*100 # 멀어질 수록 더 -가 커짐
+        fuel_reward = - fuel_dot_t1*100 # 클수록 안좋음
 
         #----------------------------- state update phase ------------------------ #
         new_state = np.array([SoC_t1, fuel_dot_t1, current_v_veh, next_w_eng], dtype=np.float64)
@@ -364,11 +383,12 @@ class HEV(gym.Env):
             "T_req"                 : float(T_req),         # Requested torque
             "T_eng"                 : float(T_eng),         # Engine torque
             "T_bsg"                 : float(T_bsg),         # BSG torque
-            "SoC"                   : float(SoC_t1)*100,    # 이번 스텝 시작 시의 SoC (%)
+            "SoC"                   : float(SoC_t1),    # 이번 스텝 시작 시의 SoC (%)
             "prev_w_eng"            : float(prev_w_eng),    # 이번 스텝에서 사용한 w_eng
             "T_eng_max"             : float(self.get_engine_max_torque(prev_w_eng)),    # 이번 스텝에서의 max torque
             "soc_reward"            : float(soc_reward),
             "fuel_reward"           : float(fuel_reward),
+            "total_reward"          : float(reward),
         }
 
         #--------------------------------- closing phase ------------------------ #
