@@ -1,7 +1,10 @@
 import math
+import os
+from typing import Tuple
 import numpy as np
 import pandas as pd
 import gymnasium as gym
+from scipy.interpolate import RegularGridInterpolator
 # import wandb
 
 profile_name = 'wltp_1Hz.csv' # wltp cycle (value fixed)
@@ -92,10 +95,30 @@ class HEV(gym.Env):
     # TODO BSFG map을 써서 적용
     # reward 
     # g/(kWh) -> km/L 연비 계산 가능
-    def engine_modeling(self, w, T):
-        LHV = 44e6 #LHV of gasoline, 44MJ/kg(while diesel is 42.5 MJ/kg)
-        eff = 0.25 # usually 25% for gasoline
-        m_dot = (w * T) / (eff * LHV) 
+    def engine_modeling(self, w_eng, T):
+        # LHV = 44e6 #LHV of gasoline, 44MJ/kg(while diesel is 42.5 MJ/kg)
+        # eff = 0.25 # usually 25% for gasoline
+        # m_dot = engine_power / (eff * LHV)
+
+        filename = os.path.join(".", "vehicle_map", "BSFC_SNU.csv")
+        df = pd.read_csv(filename, index_col=0)
+        torque_grid = df.index.values.astype(float)
+        rpm_grid = np.array([float(col) for col in df.columns])
+        eff_map = df.values.astype(float)
+        
+        eff_interpolator = RegularGridInterpolator(
+            (torque_grid, rpm_grid),
+            eff_map,
+            bounds_error=False,
+            fill_value=None
+        )
+        
+        rpm_eng = w_eng * 60 / (2 * np.pi)
+        bsfc_point = np.array([T, rpm_eng])
+        BSFC = eff_interpolator(bsfc_point)[0]
+
+        engine_power = w_eng * T
+        m_dot = (engine_power * BSFC) / (3.6e9)
         return m_dot
     
     def gear_number(self, v_veh): # 후진 고려 X
@@ -134,10 +157,24 @@ class HEV(gym.Env):
         return omega_slip
     
     # efficiency of motor(bsg)
-    def eta_motor(self, w, T):
-        ## TODO put eff map here
-        eff = 0.9
-        return eff
+    def eta_motor(self, w_eng, T):
+        filename = os.path.join(".", "vehicle_map", "Eff_P2_SNU.csv")
+        df = pd.read_csv(filename, index_col=0)
+        torque_grid = df.index.values.astype(float)
+        rpm_grid = np.array([float(col) for col in df.columns])
+        eff_map = df.values.astype(float)
+        
+        eff_interpolator = RegularGridInterpolator(
+            (torque_grid, rpm_grid),
+            eff_map,
+            bounds_error=False,
+            fill_value=None
+        )
+        
+        rpm_eng = w_eng * 60 / (2 * np.pi)
+        point = np.array([T, rpm_eng])
+        eff = eff_interpolator(point)[0]
+        return eff/100
 
     ## efficiency of transmission
     def eta_transmission(self, n_gear, T_trans, w_trans):
@@ -146,7 +183,7 @@ class HEV(gym.Env):
         return eff
     
     ## take rpm and return maximum available torque
-    def get_engine_max_torque(self, w_eng):
+    def get_engine_max_torque(self, w_eng) -> float:
         rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
 
         A = 2000  # 최대값 위치 (1450과 3500 사이의 임의 값)
@@ -156,7 +193,7 @@ class HEV(gym.Env):
         return T_eng_max
     
     # 전기모터 최대 토크 함수 (입력: rpm, scalar)
-    def get_motor_max_torque(self, w_eng):
+    def get_motor_max_torque(self, w_eng) -> float:
         rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
 
         T_motor_max = 280.0  # 최대 전기모터 토크 (Nm)
@@ -168,7 +205,7 @@ class HEV(gym.Env):
             return T_motor_max * math.exp(-(rpm_eng - threshold) / decay_factor)
 
     # 회생제동 토크 모델 (입력: rpm, scalar)
-    def get_motor_max_break(self, w_eng):
+    def get_motor_max_break(self, w_eng) -> float:
         rpm_eng = w_eng * 60 / (2 * np.pi)  # rad/s -> rpm
 
         T_max_regen = 280.0    # 최대 회생제동 토크 (양수값; 실제 토크는 음수)
@@ -181,7 +218,7 @@ class HEV(gym.Env):
 
     ## vehicle modeling
     # Define a function to update the vehicle states based on control inputs
-    def update_vehicle_states(self, n_g, T_eng, T_bsg, T_brk, SoC, v_veh, w_eng, stop=False):
+    def update_vehicle_states(self, n_g, T_eng : float, T_bsg, T_brk, SoC, v_veh, w_eng, stop=False):
         car = self.car_config # load config
 
         m_fuel_dot = self.engine_modeling(w_eng, T_eng)
@@ -359,7 +396,10 @@ class HEV(gym.Env):
 
         # T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos)
         T_eng, T_bsg, T_brk = self.power_split_HCU(ratio, SoC_t0, T_req, prev_w_eng)
-
+        if (type(T_eng) == np.ndarray):
+            T_eng = T_eng[0]
+        if (type(T_bsg) == np.ndarray):
+            T_bsg = T_bsg[0]
         #-------------------------------- 3. state update phase -------------------------------- #
         ## t+1 state의 값들을 계산
         # prev_v_veh == 현재 시간 차량의 속도, current_v_veh == 다음 시간 차량의 속도
@@ -407,3 +447,9 @@ class HEV(gym.Env):
         info = {} #none for reset
 
         return self.state, info
+    
+
+if __name__ == "__main__":
+    env = HEV()
+    # print(env.eta_motor(209, 100))
+    print(env.engine_modeling(209, 100))
