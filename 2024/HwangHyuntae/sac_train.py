@@ -16,7 +16,8 @@ episodes = 1
 callbacks = None
 
 ## set models
-env = HEV(start_time=start_time, step_size=step_size, config=config,)
+train_cycle = os.path.join("test_cycle", "wltp_1Hz.csv")  # Urban 사이클 파일 경로
+env = HEV(start_time=start_time, step_size=step_size, config=config, profile_name=train_cycle)
 model = stable_baselines3.SAC("MlpPolicy", env)
 
 ## callback setting

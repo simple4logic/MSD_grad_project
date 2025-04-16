@@ -7,8 +7,6 @@ import gymnasium as gym
 from scipy.interpolate import RegularGridInterpolator
 # import wandb
 
-profile_name = 'wltp_1Hz.csv' # wltp cycle (value fixed)
-
 ## 23년식 가솔린 터보 1.6 하이브리드 2WD / 5인승
 ## https://www.kiamedia.com/us/en/models/sorento-hev/2023/specifications
 class MQ4: ## car_config
@@ -30,7 +28,7 @@ class MQ4: ## car_config
 
 
 class HEV(gym.Env):
-    def __init__(self, start_time=0, step_size=1, config=None) -> None:
+    def __init__(self, start_time=0, step_size=1, config=None, profile_name='wltp_1Hz.csv') -> None:
         super(HEV, self).__init__()
     #------------------------- step parameter /*DO NOT CHANGE*/ ------------------------ #
         self.start_time = start_time
