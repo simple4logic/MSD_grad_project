@@ -11,8 +11,10 @@ model = SAC.load(model_path)
 
 # 2. Urban 사이클(또는 다른 cycle)을 사용하는 환경 생성
 # profile_filename 인자를 'urban.csv'로 전달합니다.
-test_name = "hwfet"
-test_cycle = os.path.join("test_cycle", test_name + "_kph.csv")  # Urban 사이클 파일 경로
+test_name = "udds"
+# test_name = "wltp_1Hz"
+# test_name = "hwfet"
+test_cycle = os.path.join("test_cycle", test_name + ".csv")  # Urban 사이클 파일 경로
 env = HEV(start_time=0, step_size=1, config=None, profile_name=test_cycle)
 
 # 결과 저장을 위한 빈 리스트 생성

@@ -23,8 +23,8 @@ class MQ4: ## car_config
     I_aux = 0.0         # auxiliary current (A) // assume none
     # I_bias = 1          # constant current bias
     # alpha = 1           # road grade (slope of the road)  ## time variant, depends on the road condition
-    w_stall = 52.36     # minimum engine speed not to stall // rad/s
-    w_idle = 8.38       # speed without giving any power // rad/s
+    w_stall = 136     # minimum engine speed not to stall // rad/s
+    w_idle = 136       # speed without giving any power // rad/s // TODO ref - 1,300 RPM = 136.135682 rad/s
 
 
 class HEV(gym.Env):
@@ -52,6 +52,10 @@ class HEV(gym.Env):
         self.reward = None
         self.done = False
 
+        ## read csv motor, engine map TODO
+        ## self.engine_map = pd.read_csv("engine_map.csv")
+        ## self.motor_map = pd.read_csv("motor_map.csv")
+
     #------------------------- space limitation ------------------------ #
         self.observation_space = gym.spaces.Box(
             low=np.array([0, 0, 0, 0]),  # [soc 최소값, fuel_dot 최소값, prev_v_veh 최소값]
@@ -71,7 +75,6 @@ class HEV(gym.Env):
 
 
     #------------------------- car modeling functions and logics ------------------------ #
-    #battery model : agm80ah
     def V_oc(self, SoC_t):
         SoC_t = np.clip(SoC_t, 0.0, 1.0)
         if SoC_t <= 0.3:
@@ -99,7 +102,7 @@ class HEV(gym.Env):
         # m_dot = engine_power / (eff * LHV)
 
         filename = os.path.join(".", "vehicle_map", "BSFC_SNU.csv")
-        df = pd.read_csv(filename, index_col=0)
+        df = pd.read_csv(filename, index_col=0) ## TODO read csv -> reset 1번만 불러오고 
         torque_grid = df.index.values.astype(float)
         rpm_grid = np.array([float(col) for col in df.columns])
         eff_map = df.values.astype(float)
@@ -355,9 +358,10 @@ class HEV(gym.Env):
                         T_brk = T_bsg + T_eng - T_req
                     #else : do nothing
 
-
         # 5. Enforce engine on/off switching constraints:
         ## TODO 엔진토크가 0보다 커지면 engine ON / 2.5초내로 engine의 on off를 바꾸는건 불가능함 (있으면 좋은 것)
+        ## idle RPM 이상으로는 나오도록 토크가 걸려야함
+        ## engine off limit을 주거나 안주거나 적용을 선택할 수 있도록 -> 학습 양상을 보고 넣을지 결정.
         ## engine on off 마다 reward 를 줄수도 있긴 한데 좀 까다로울 수도 있음
         ## engine을 키면 한N(~3)초 정도는 다시 토크를 0 으로 설정하는건 불가능하게 제약 필요 **
 
@@ -405,14 +409,16 @@ class HEV(gym.Env):
 
         #----------------------------- reward definition phase ------------------------ #
         # 새로운 state에 대해서 reward를 계산
-        soc_reward = - ((abs(self.soc_base - SoC_t1))**2)*100 # 멀어질 수록 더 -가 커짐
+        # TODO soc, fuel 둘다 0 ~ -1 사이에 놓이게
+        soc_reward = - ((abs(self.soc_base - SoC_t1))**2)*10 # 멀어질 수록 더 -가 커짐
         fuel_reward = - fuel_dot_t1*100 # 클수록 안좋음
 
         #----------------------------- state update phase ------------------------ #
         new_state = np.array([SoC_t1, fuel_dot_t1, current_v_veh, next_w_eng], dtype=np.float64)
         self.state = new_state
 
-        reward = soc_reward + fuel_reward # 원하는 target에 따라서 tuning 할 수 있음 reward 에 배치
+        # TODO : reward는 -1 ~ 1 사이로 -> 이게 가장 중요
+        reward = 1 + soc_reward + fuel_reward # 원하는 target에 따라서 tuning 할 수 있음 reward 에 배치
 
         #--------------------------------- for debugging ------------------------ #
         info = {
