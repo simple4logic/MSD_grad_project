@@ -28,7 +28,7 @@ class MQ4: ## car_config
 
 
 class HEV(gym.Env):
-    def __init__(self, start_time=0, step_size=1, config=None, profile_name='wltp_1Hz.csv') -> None:
+    def __init__(self, start_time=0, step_size=1, config=None, profile_name='wltp.csv') -> None:
         super(HEV, self).__init__()
     #------------------------- step parameter /*DO NOT CHANGE*/ ------------------------ #
         self.start_time = start_time

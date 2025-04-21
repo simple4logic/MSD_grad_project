@@ -110,7 +110,7 @@ if __name__ == "__main__":
     total_timesteps = stop_time * episodes_to_train
 
     # env setup
-    train_cycle = os.path.join("test_cycle", "wltp_1Hz.csv")
+    train_cycle = os.path.join("test_cycle", "wltp.csv")
     env = HEV(
         start_time=start_time,
         step_size=step_size,
