@@ -23,7 +23,7 @@ class MQ4: ## car_config
     I_aux = 0.0         # auxiliary current (A) // assume none
     # I_bias = 1          # constant current bias
     # alpha = 1           # road grade (slope of the road)  ## time variant, depends on the road condition
-    w_stall = 136     # minimum engine speed not to stall // rad/s
+    w_stall = 40.8     # minimum engine speed not to stall // rad/s
     w_idle = 136       # speed without giving any power // rad/s // TODO ref - 1,300 RPM = 136.135682 rad/s
 
 
@@ -52,9 +52,7 @@ class HEV(gym.Env):
         self.reward = None
         self.done = False
 
-        ## read csv motor, engine map TODO
-        ## self.engine_map = pd.read_csv("engine_map.csv")
-        ## self.motor_map = pd.read_csv("motor_map.csv")
+
 
     #------------------------- space limitation ------------------------ #
         self.observation_space = gym.spaces.Box(
@@ -70,8 +68,10 @@ class HEV(gym.Env):
         )
     #------------------------- car specification ------------------------ #
         self.car_config = MQ4
-        # self.engine_map     # = effmap (in w_eng, T_eng -> out eff)
-        # self.motor_map      # = effmap (in w_mot, T_mot -> out eff)
+        bsfc_filename = os.path.join(".", "vehicle_map", "BSFC_SNU.csv")
+        self.engine_map = pd.read_csv(bsfc_filename, index_col=0)
+        eff_filename = os.path.join(".", "vehicle_map", "Eff_P2_SNU.csv")
+        self.motor_map = pd.read_csv(eff_filename, index_col=0)
 
 
     #------------------------- car modeling functions and logics ------------------------ #
@@ -93,16 +93,8 @@ class HEV(gym.Env):
     
     # take w_eng and T_eng as input
     # return fuel consumption rate
-    # TODO BSFG map을 써서 적용
-    # reward 
-    # g/(kWh) -> km/L 연비 계산 가능
     def engine_modeling(self, w_eng, T):
-        # LHV = 44e6 #LHV of gasoline, 44MJ/kg(while diesel is 42.5 MJ/kg)
-        # eff = 0.25 # usually 25% for gasoline
-        # m_dot = engine_power / (eff * LHV)
-
-        filename = os.path.join(".", "vehicle_map", "BSFC_SNU.csv")
-        df = pd.read_csv(filename, index_col=0) ## TODO read csv -> reset 1번만 불러오고 
+        df = self.engine_map
         torque_grid = df.index.values.astype(float)
         rpm_grid = np.array([float(col) for col in df.columns])
         eff_map = df.values.astype(float)
@@ -159,8 +151,7 @@ class HEV(gym.Env):
     
     # efficiency of motor(bsg)
     def eta_motor(self, w_eng, T):
-        filename = os.path.join(".", "vehicle_map", "Eff_P2_SNU.csv")
-        df = pd.read_csv(filename, index_col=0)
+        df = self.motor_map
         torque_grid = df.index.values.astype(float)
         rpm_grid = np.array([float(col) for col in df.columns])
         eff_map = df.values.astype(float)
@@ -362,7 +353,6 @@ class HEV(gym.Env):
         ## TODO 엔진토크가 0보다 커지면 engine ON / 2.5초내로 engine의 on off를 바꾸는건 불가능함 (있으면 좋은 것)
         ## idle RPM 이상으로는 나오도록 토크가 걸려야함
         ## engine off limit을 주거나 안주거나 적용을 선택할 수 있도록 -> 학습 양상을 보고 넣을지 결정.
-        ## engine on off 마다 reward 를 줄수도 있긴 한데 좀 까다로울 수도 있음
         ## engine을 키면 한N(~3)초 정도는 다시 토크를 0 으로 설정하는건 불가능하게 제약 필요 **
 
         return T_eng, T_bsg, T_brk
@@ -418,7 +408,7 @@ class HEV(gym.Env):
         self.state = new_state
 
         # TODO : reward는 -1 ~ 1 사이로 -> 이게 가장 중요
-        reward = 1 + soc_reward + fuel_reward # 원하는 target에 따라서 tuning 할 수 있음 reward 에 배치
+        total_reward = 1 + soc_reward + fuel_reward # 원하는 target에 따라서 tuning 할 수 있음 reward 에 배치
 
         #--------------------------------- for debugging ------------------------ #
         info = {
@@ -432,14 +422,14 @@ class HEV(gym.Env):
             "T_eng_max"             : float(self.get_engine_max_torque(prev_w_eng)),    # 이번 스텝에서의 max torque
             "soc_reward"            : float(soc_reward),
             "fuel_reward"           : float(fuel_reward),
-            "total_reward"          : float(reward),
+            "total_reward"          : float(total_reward),
         }
 
         #--------------------------------- closing phase ------------------------ #
         is_done = lambda time: time >= self.stop_time
         self.time += self.step_size
         done = is_done(self.time)
-        return self.state, reward, done, False, info
+        return self.state, total_reward, done, False, info
 
 
     def reset(self, seed=None, options=None):
@@ -456,4 +446,4 @@ class HEV(gym.Env):
 if __name__ == "__main__":
     env = HEV()
     # print(env.eta_motor(209, 100))
-    print(env.engine_modeling(209, 100))
+    # print(env.engine_modeling(209, 100))

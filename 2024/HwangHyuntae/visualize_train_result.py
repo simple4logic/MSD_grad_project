@@ -3,9 +3,10 @@ import os
 import matplotlib.pyplot as plt
 
 # JSON 파일 경로
-json_name = "episode_info_sac.json"
+json_name = "results_wltp_1Hz.json"
+# json_name = "episode_info_sac.json"
 # json_name = "last_loop.json"
-save_path = os.path.join("episode_data", json_name)
+save_path = os.path.join("json_data", json_name)
 
 # JSON 파일 읽기
 with open(save_path, "r") as f:
@@ -35,7 +36,7 @@ fig, ax1 = plt.subplots(figsize=(10, 5))
 # 왼쪽 y축: T_eng와 T_bsg 플롯
 ax1.plot(times, T_eng, label="T_eng", color="blue")
 ax1.plot(times, T_bsg, label="T_bsg", color="purple")
-# plt.plot(times, T_req, label="T_req", color="green")
+plt.plot(times, T_req, label="T_req", color="green")
 # plt.plot(times, T_eng_max, label="T_eng_max", color="red")
 # plt.plot(times, prev_w_eng, label="prev_w_eng", color="green")
 # plt.plot(times, soc_reward, label="soc_reward", color="blue")
