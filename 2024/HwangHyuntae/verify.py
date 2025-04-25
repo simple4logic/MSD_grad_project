@@ -23,21 +23,31 @@ def parse_args():
         choices=["udds", "wltp", "hwfet"],
         help="choose test cycle name"
     )
+    parser.add_argument(
+        "--target-eps", "--eps",
+        type=int,
+        default="0",
+        help="choose which episode to test"
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    chkpt_dir = os.path.join(".", "checkpoints")
-    pattern = os.path.join(chkpt_dir, "sac_hev_*_eps.zip")
-    all_files = glob.glob(pattern)
-    if not all_files:
-        raise FileNotFoundError(f"No checkpoint found in {chkpt_dir}")
-    def eps_from_path(p):
-        name = os.path.basename(p)
-        return int(name.split("_")[-2])
-    latest_file = max(all_files, key=eps_from_path)
-    latest_eps  = eps_from_path(latest_file)
+    chkpt_dir = os.path.join(".", "checkpoints", "model")
+    if args.target_eps != 0:
+        latest_eps = args.target_eps
+    else:
+        pattern = os.path.join(chkpt_dir, "sac_hev_*_eps.zip")
+        all_files = glob.glob(pattern)
+        if not all_files:
+            raise FileNotFoundError(f"No checkpoint found in {chkpt_dir}")
+        def eps_from_path(p):
+            name = os.path.basename(p)
+            return int(name.split("_")[-2])
+        latest_file = max(all_files, key=eps_from_path)
+        latest_eps  = eps_from_path(latest_file)
+    
     last_trained_file = os.path.join(chkpt_dir, f"sac_hev_{latest_eps}_eps.zip")
     print(f"Start verifying target episode {latest_eps}")
 
@@ -78,7 +88,7 @@ if __name__ == "__main__":
             "fuel_reward"           : info.get("fuel_reward", None),
             "total_reward"          : info.get("total_reward", None),
         })
-        print("Current Step : ", info.get("time", None))
+        # print("Current Step : ", info.get("time", None))
 
     print("Total Reward:", total_reward)
 

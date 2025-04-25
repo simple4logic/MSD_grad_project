@@ -44,6 +44,7 @@ class EpisodeCheckpointCallback(BaseCallback):
                     if self._episode_count % self.save_freq_eps == 0:
                         model_path = os.path.join(
                             self.save_path,
+                            "model",
                             f"{self.name_prefix}_{self._episode_count}_eps" # .zip model 저장
                         )
                         self.model.save(model_path)
@@ -120,7 +121,7 @@ if __name__ == "__main__":
 
     # callback configuration
     progress_cb = TqdmProgressBarCallback(total_timesteps=total_timesteps)
-    info_cb     = SaveInfoCallback(log_path="json_data/episode_info_sac.json")
+    info_cb     = SaveInfoCallback(log_path="json_data/final_episode_info.json")
     eps_chkpt_cb = EpisodeCheckpointCallback(
         save_freq_episodes=args.checkpoint_freq,
         save_path=chkpt_dir,

@@ -2,10 +2,11 @@ import json
 import os
 import matplotlib.pyplot as plt
 
-def plot_results(test_name="wltp"):
-    json_name = f"results_{test_name}.json"
-    # json_name = "episode_info_sac.json"
-    # json_name = "last_loop.json"
+def plot_results(test_name="wltp", specific_name = None):
+    if specific_name is not None:
+        json_name = specific_name
+    else:
+        json_name = f"results_{test_name}.json"
     save_path = os.path.join("json_data", json_name)
 
     # JSON 파일 읽기
@@ -65,4 +66,6 @@ def plot_results(test_name="wltp"):
 
 
 if __name__ == "__main__":
-    plot_results()
+    specific_name = "results_wltp.json"
+    # specific_name = "final_episode_info.json"
+    plot_results(specific_name=specific_name)
