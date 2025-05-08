@@ -29,6 +29,11 @@ def parse_args():
         default="0",
         help="choose which episode to test"
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="cycle 실행 중 progress를 출력합니다."
+    )
     return parser.parse_args()
 
 
@@ -66,12 +71,17 @@ if __name__ == "__main__":
     obs, info = env.reset()
     done = False
     total_reward = 0
+    step_count = 0
 
     while not done:
         # 에이전트의 행동 예측 (deterministic=True로 선택)
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, done, truncated, info = env.step(action)
         total_reward += reward
+
+        step_count += 1
+        if args.verbose and step_count % 10 == 0:
+            print(f"Running step: {step_count} / time: {info.get('time', '?')}")
 
         # 각 스텝의 결과를 딕셔너리로 저장
         results.append({

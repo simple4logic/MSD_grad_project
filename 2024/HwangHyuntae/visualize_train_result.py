@@ -55,6 +55,18 @@ def plot_results(test_name="wltp", specific_name = None):
     ax2.set_ylabel("State of Charge (SoC)", color="black")
     ax2.tick_params(axis="y", labelcolor="black")
 
+    ## total reward visualization
+    total_reward_sum = sum([r for r in total_reward if r is not None])
+    ax2.text(
+        0.99, 0.95,
+        f"Total Reward: {total_reward_sum:.2f}",
+        transform=ax2.transAxes,
+        fontsize=10,
+        verticalalignment='top',
+        horizontalalignment='right',
+        bbox=dict(boxstyle="round,pad=0.3", edgecolor='black', facecolor='white')
+    )
+
     # 범례 설정
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
