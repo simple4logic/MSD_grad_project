@@ -57,7 +57,8 @@ if __name__ == "__main__":
     print(f"Start verifying target episode {latest_eps}")
 
     # 1. 학습된 모델 불러오기
-    model = SAC.load(last_trained_file)
+    model = SAC.load(last_trained_file, custom_objects={"lr_schedule": lambda _: 0.0003})
+    
 
     # 2. Urban 사이클(또는 다른 cycle)을 사용하는 환경 생성
     # profile_filename 인자를 'urban.csv'로 전달합니다.
@@ -103,7 +104,7 @@ if __name__ == "__main__":
     print("Total Reward:", total_reward)
 
     # JSON 파일로 저장 (indent=4로 가독성 있게 저장)
-    output_file = os.path.join("json_data", "results_" + args.test_name + ".json") 
+    output_file = os.path.join("json_data", "results_" + args.test_name + "_" + str(args.target_eps) + ".json") 
     with open(output_file, "w") as f:
         json.dump(results, f, indent=4)
 
