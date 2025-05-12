@@ -246,19 +246,13 @@ class HEV(gym.Env):
             P_bsg = T_bsg * w_bsg / self.eta_motor(w_bsg, T_bsg)
         # eta_motor != 0 이라는 전제
 
-        # 3. Battery Model (need function V_oc, R_0 from pack supplier)
+        # 3. Battery Model
         root = self.V_oc(SoC)**2 - 4 * self.R_0(SoC) * P_bsg # verify root >= 0
         I_t = (self.V_oc(SoC) - np.sqrt(root if root >= 0 else 0)) / (2 * self.R_0(SoC))
         # C_nom = Ah이기 때문에 분자도 A * hour 로 통일시켜줌
         battey_voltage = 270
         DIFF = ((self.step_size / 3600) * battey_voltage * (I_t + car.I_aux)) / (car.battery_cap * 1000)
         SoC -= DIFF # Wh / Wh -> %
-        # print("---------------------------------------------------------------------")
-        # print("T_bsg : ", T_bsg, "w_bsg : ", w_bsg)
-        # print("P_bsg : ", P_bsg)
-        # print(f"current : {I_t}, resistance : {self.R_0(SoC)}, voltage : {self.V_oc(SoC)}")
-        # print("SoC : ", SoC, "DIFF : ", DIFF)
-        # print("")
 
         # 4. Torque Converter Model
         T_pt = T_bsg + T_eng - T_brk # from the figure 2 block diagram
@@ -399,16 +393,14 @@ class HEV(gym.Env):
 
         #----------------------------- reward definition phase ------------------------ #
         # 새로운 state에 대해서 reward를 계산
-        # TODO soc, fuel 둘다 0 ~ -1 사이에 놓이게
         soc_reward = - ((abs(self.soc_base - SoC_t1))**2)*10 # 멀어질 수록 더 -가 커짐
         fuel_reward = - fuel_dot_t1*100 # 클수록 안좋음
+        # TODO : reward는 -1 ~ 1 사이로 -> 이게 가장 중요
+        total_reward = 1 + soc_reward + fuel_reward # 원하는 target에 따라서 tuning 할 수 있음 reward 에 배치
 
         #----------------------------- state update phase ------------------------ #
         new_state = np.array([SoC_t1, fuel_dot_t1, current_v_veh, next_w_eng], dtype=np.float64)
         self.state = new_state
-
-        # TODO : reward는 -1 ~ 1 사이로 -> 이게 가장 중요
-        total_reward = 1 + soc_reward + fuel_reward # 원하는 target에 따라서 tuning 할 수 있음 reward 에 배치
 
         #--------------------------------- for debugging ------------------------ #
         info = {
