@@ -9,23 +9,31 @@ from scipy.interpolate import RegularGridInterpolator
 
 ## 23년식 가솔린 터보 1.6 하이브리드 2WD / 5인승
 ## https://www.kiamedia.com/us/en/models/sorento-hev/2023/specifications
-class MQ4: ## car_config
-    Mass = 1775         # Vehicle mass (kg)
-    wheel_R = 0.3       # Wheel radius (m)
-    gravity = 9.81      # Gravitational constant (m/s^2)
-    drag_coeff = 0.35   # Aerodynamic drag coefficient
-    rho_air = 1.225     # Air density (kg/m^3)
-    Area_front = 2.7829 # Frontal area (m^2)
-    roll_coeff = 0.015  # Rolling resistance coefficient
-    tau_belt = 1        # belt ratio
-    tau_fdr = 3.5       # final drive ratio
-    battery_cap = 1.5   # capacity of the battery (kWh)
-    I_aux = 0.0         # auxiliary current (A) // assume none
-    # I_bias = 1          # constant current bias
-    # alpha = 1           # road grade (slope of the road)  ## time variant, depends on the road condition
-    w_stall = 40.8     # minimum engine speed not to stall // rad/s
-    w_idle = 136       # speed without giving any power // rad/s // TODO ref - 1,300 RPM = 136.135682 rad/s
 
+# (mass, battery_cap, wheel_R, Area_front)
+## Guide Auto Web, “2023 Kia Sorento HEV LX Specifications,” The Car Guide. [Online]. Available: https://www.guideautoweb.com/en/makes/kia/sorento/2023/specifications/hev-lx/. [Accessed: May 22, 2025].
+class MQ4: ## car_config
+    gravity = 9.81      # Gravitational constant (m/s^2)
+    drag_coeff = 0.32   # Aerodynamic drag coefficient
+    # -> Kia Corporation, *2022 Sorento Specifications Sheet*, Jan. 2022. [Online]. Available: https://www.kia.com/content/dam/kwcms/sg/en/pdf/Brochure/Brochure_Specs/SorentoBrochureSpecsSheet_Jan2022.pdf
+    rho_air = 1.204     # Air density (kg/m^3)
+    roll_coeff = 0.015  # Rolling resistance coefficient
+    # -> T. D. Gillespie, *Fundamentals of Vehicle Dynamics*, Warrendale, PA: Society of Automotive Engineers, 1992, p. 117. ISBN: 1-56091-199-9.
+    I_aux = 0.0         # auxiliary current (A) // assume none!
+
+    # need Actual values
+    Mass = 1869         # Vehicle mass (kg) *checked!
+    wheel_R = 0.36865   # Wheel radius (m)   P235/65R17  *checked!
+    Area_front = 3.2205 # Frontal area, H*W = 1.695 * 1.9 (m^2) *checked!
+    tau_belt = 1        # belt ratio
+    tau_fdr = 3.510     # final drive ratio *checked!
+    # -> Kia America, “2023 Sorento HEV Specifications,” Kia Media. [Online]. Available: https://www.kiamedia.com/us/en/models/sorento-hev/2023/specifications. [Accessed: May 22, 2025]
+    battery_cap = 1.5   # capacity of the battery (kWh) *checked!
+    w_stall = 40.8      # minimum engine speed not to stall // rad/s
+    w_idle = 83.775804  # speed without giving any power // rad/s (ref - 800 RPM) *checked!
+    # -> “Idle (engine),” Wikipedia. [Online]. Available: https://en.wikipedia.org/wiki/Idle_(engine). [Accessed: May 22, 2025].
+
+# **wheel diameter = P235/65R17 -> (235*0.65*2+17*25.4) = 737.3mm, wheel radius = 737.3mm /1000 /2 = 0.36865m
 
 class HEV(gym.Env):
     def __init__(self, start_time=0, step_size=1, config=None, profile_name='wltp.csv') -> None:
@@ -130,6 +138,7 @@ class HEV(gym.Env):
 
     # get gear ratio using gear number
     def gear_ratio(self, n_gear):
+    ## https://www.kiamedia.com/us/en/models/sorento-hev/2023/specifications
         tau_gear = {
             1: 4.639,
             2: 2.826,
@@ -250,7 +259,7 @@ class HEV(gym.Env):
         root = self.V_oc(SoC)**2 - 4 * self.R_0(SoC) * P_bsg # verify root >= 0
         I_t = (self.V_oc(SoC) - np.sqrt(root if root >= 0 else 0)) / (2 * self.R_0(SoC))
         # C_nom = Ah이기 때문에 분자도 A * hour 로 통일시켜줌
-        battey_voltage = 270
+        battey_voltage = 270 # Voltage
         DIFF = ((self.step_size / 3600) * battey_voltage * (I_t + car.I_aux)) / (car.battery_cap * 1000)
         SoC -= DIFF # Wh / Wh -> %
 
