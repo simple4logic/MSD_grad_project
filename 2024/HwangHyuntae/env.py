@@ -180,7 +180,7 @@ class HEV(gym.Env):
     ## efficiency of transmission
     def eta_transmission(self, n_gear, T_trans, w_trans):
         ## TODO put eff map here
-        eff = 0.9
+        eff = 0.95
         return eff
     
     ## take rpm and return maximum available torque
@@ -297,16 +297,29 @@ class HEV(gym.Env):
     
 
     # Define a function to split the power between the engine and the BSG
-    def power_split_HCU(self, ratio, SoC, T_req, w_eng):
+    def power_split_HCU(self, ratio, SoC, T_req_crank, w_eng):
         #** T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos) **#
-
-        # 1. Clip the ratio to the realistic range [0, 1]
-        real_ratio = max(min(ratio, 1.0), 0.0)
         
-        # 2. Compute maximum engine torque from current w_eng(rad/s)
-        T_max_eng = self.get_engine_max_torque(w_eng)   # positive
-        T_max_bsg = self.get_motor_max_torque(w_eng)    # positive
-        T_max_regen = self.get_motor_max_break(w_eng)   # minus
+        # 1. Compute maximum motor torque from current w_eng(rad/s)
+        w_bsg = self.car_config.tau_belt * w_eng
+        T_max_bsg_shaft = self.get_motor_max_torque(w_bsg)   # 모터축, positive
+        T_max_regen_shaft = self.get_motor_max_break(w_bsg)  # 모터축, negative
+
+        # 2. convert max torque from motor shaft to crankshaft
+        eta_belt = 0.95 ## TODO -> transmission eff : n_gear, w_bsg, T_bsg에 따라서 변동하는 값
+        def to_crank(T_m):
+            return T_m * self.car_config.tau_belt * eta_belt if T_m >= 0 \
+                else T_m / (self.car_config.tau_belt * eta_belt)
+
+        # 3. get all max torque @ crankshaft        
+        T_max_bsg =  to_crank( T_max_bsg_shaft )   # 크랭크축, positive
+        T_max_reg =  to_crank( T_max_regen_shaft ) # 크랭크축, negative
+        T_max_eng = self.get_engine_max_torque(w_eng)   # 크랭크축, positive
+
+        
+        # 4. Clip the ratio to the realistic range [0, 1]
+        real_ratio = np.clip(ratio, 0, 1)
+        T_eng = T_max_eng * ratio
 
         # 3. T_eng 계산 (Soc 상태 고려)
         if SoC < 0.2:
@@ -316,40 +329,40 @@ class HEV(gym.Env):
 
 
         ## case 1 : 제동 상황
-        if(T_req < 0):
+        if(T_req_crank < 0):
             # motor regen 제동만으로 충분한 경우 (T_max_regen 크기 > required)
             if SoC >= 1.0: # 배터리 완충
                 T_bsg = 0 # 회생제동 절대 X
-                T_brk = T_eng - T_req
+                T_brk = T_eng - T_req_crank
             else: # 배터리 충전 가능
-                if(T_max_regen < (T_req - T_eng)):
-                    T_bsg = T_req - T_eng
+                if(T_max_regen_shaft < (T_req_crank - T_eng)):
+                    T_bsg = T_req_crank - T_eng
                     T_brk = 0
                 # motor regen 제동으로는 부족한 경우
                 else:
-                    T_bsg = T_max_regen
-                    T_brk = (T_eng + T_bsg) - T_req
+                    T_bsg = T_max_regen_shaft
+                    T_brk = (T_eng + T_bsg) - T_req_crank
 
         ## case 2. 가속 상황
         else: # T_req >= 0
             T_brk = 0 # brake 사용할 필요 X
 
             # 4. Compute BSG torque requirement
-            T_bsg = T_req - T_eng
+            T_bsg = T_req_crank - T_eng
 
             if(T_bsg > 0): # 배터리 소모
-                if(T_bsg > T_max_bsg): # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
-                    T_bsg = T_max_bsg
-                    T_eng = T_req - T_bsg # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
+                if(T_bsg > T_max_bsg_shaft): # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
+                    T_bsg = T_max_bsg_shaft
+                    T_eng = T_req_crank - T_bsg # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
                 #else : do nothing 
             else: # T_bsg < 0, 회생제동, 충전
                 if SoC >= 1.0: # 배터리 완충 (충전 불가)
                    T_bsg = 0
-                   T_eng = T_req
+                   T_eng = T_req_crank
                 else:  # 충전 가능
-                    if(T_bsg < T_max_regen): # BSG 충전 역토크의 최대치를 넘어가는 경우
-                        T_bsg = T_max_regen
-                        T_brk = T_bsg + T_eng - T_req
+                    if(T_bsg < T_max_regen_shaft): # BSG 충전 역토크의 최대치를 넘어가는 경우
+                        T_bsg = T_max_regen_shaft
+                        T_brk = T_bsg + T_eng - T_req_crank
                     #else : do nothing
 
         # 5. Enforce engine on/off switching constraints:
