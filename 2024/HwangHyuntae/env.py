@@ -26,6 +26,7 @@ class MQ4: ## car_config
     wheel_R = 0.36865   # Wheel radius (m)   P235/65R17  *checked!
     Area_front = 3.2205 # Frontal area, H*W = 1.695 * 1.9 (m^2) *checked!
     tau_belt = 1        # belt ratio
+    eta_belt = 0.95     # belt efficiency motorshaft -> crankshaft
     tau_fdr = 3.510     # final drive ratio *checked!
     # -> Kia America, “2023 Sorento HEV Specifications,” Kia Media. [Online]. Available: https://www.kiamedia.com/us/en/models/sorento-hev/2023/specifications. [Accessed: May 22, 2025]
     battery_cap = 1.5   # capacity of the battery (kWh) *checked!
@@ -263,16 +264,16 @@ class HEV(gym.Env):
         DIFF = ((self.step_size / 3600) * battey_voltage * (I_t + car.I_aux)) / (car.battery_cap * 1000)
         SoC -= DIFF # Wh / Wh -> %
 
-        # 4. Torque Converter Model
-        T_pt = T_bsg + T_eng - T_brk # from the figure 2 block diagram
-        T_tc = T_pt
+        # # 4. Torque Converter Model
+        # T_pt = T_bsg + T_eng - T_brk # from the figure 2 block diagram
+        # T_tc = T_pt
 
-        T_trans = self.gear_ratio(n_g) * T_tc
-        T_out = car.tau_fdr * T_trans
-        if(T_trans >= 0):
-            T_out *= self.eta_transmission(n_g, T_trans, w_trans)
-        else:
-            T_out /= self.eta_transmission(n_g, T_trans, w_trans)
+        # T_trans = self.gear_ratio(n_g) * T_tc
+        # T_out = car.tau_fdr * T_trans
+        # if(T_trans >= 0):
+        #     T_out *= self.eta_transmission(n_g, T_trans, w_trans)
+        # else:
+        #     T_out /= self.eta_transmission(n_g, T_trans, w_trans)
 
         return float(SoC), float(m_fuel_dot), next_w_eng
     
@@ -297,29 +298,42 @@ class HEV(gym.Env):
     
 
     # Define a function to split the power between the engine and the BSG
-    def power_split_HCU(self, ratio, SoC, T_req_crank, w_eng):
+    # T_req_wheel : 최종적으로 바퀴에 걸려야하는 토크
+    # n_gear : 현재 속도에 대응하는 기어
+    def power_split_HCU(self, ratio, SoC, T_req_wheel, w_eng, n_gear):
         #** T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos) **#
-        
-        # 1. Compute maximum motor torque from current w_eng(rad/s)
-        w_bsg = self.car_config.tau_belt * w_eng
+        # T_req_wheel = T_req_crank * (gear ratio * tau_fdr) * eff        
+
+        car = self.car_config
+        tau_total = self.gear_ratio(n_gear) * self.car_config.tau_fdr
+        eta_trans = 0.95 ## TODO -> transmission eff 함수의 값 : n_gear, w_bsg, T_bsg에 따라서 변동하는 값
+
+        # 1. calculate T_req_crank from T_req_wheel
+        # 최종적으로 바퀴에 걸려야하는 토크 -> 크랭크 축이 내야하는 토크
+        if T_req_wheel >= 0:
+            T_req_crank = T_req_wheel / (tau_total * eta_trans)
+        else:
+            T_req_crank = T_req_wheel * eta_trans / tau_total
+
+        # 2. Compute maximum motor torque from current w_eng(rad/s)
+        w_bsg = car.tau_belt * w_eng
         T_max_bsg_shaft = self.get_motor_max_torque(w_bsg)   # 모터축, positive
         T_max_regen_shaft = self.get_motor_max_break(w_bsg)  # 모터축, negative
 
-        # 2. convert max torque from motor shaft to crankshaft
-        eta_belt = 0.95 ## TODO -> transmission eff : n_gear, w_bsg, T_bsg에 따라서 변동하는 값
+        # 3. convert max torque from motor shaft to crankshaft
+        # 모터축 -> 엔진축(크랭크축)으로 변환. 나중에 합치기 위해서
         def to_crank(T_m):
-            return T_m * self.car_config.tau_belt * eta_belt if T_m >= 0 \
-                else T_m / (self.car_config.tau_belt * eta_belt)
+            return T_m * car.tau_belt * car.eta_belt if T_m >= 0 \
+                else T_m / (car.tau_belt * car.eta_belt)
 
-        # 3. get all max torque @ crankshaft        
-        T_max_bsg =  to_crank( T_max_bsg_shaft )   # 크랭크축, positive
-        T_max_reg =  to_crank( T_max_regen_shaft ) # 크랭크축, negative
+        # 4. get all max torque @ crankshaft        
+        T_max_bsg =  to_crank(T_max_bsg_shaft)   # 크랭크축, positive
+        T_max_reg =  to_crank(T_max_regen_shaft) # 크랭크축, negative
         T_max_eng = self.get_engine_max_torque(w_eng)   # 크랭크축, positive
 
-        
-        # 4. Clip the ratio to the realistic range [0, 1]
+        # 5. Clip the ratio to the realistic range [0, 1]
         real_ratio = np.clip(ratio, 0, 1)
-        T_eng = T_max_eng * ratio
+        T_eng = T_max_eng * ratio # eng torque 결정
 
         # 3. T_eng 계산 (Soc 상태 고려)
         if SoC < 0.2:
@@ -327,43 +341,31 @@ class HEV(gym.Env):
         else:
             T_eng = T_max_eng * real_ratio
 
+        # ------------------------- torque split cases -------------------------- #
+        T_bsg = T_req_crank - T_eng
+        T_brk = 0.0
 
-        ## case 1 : 제동 상황
-        if(T_req_crank < 0):
-            # motor regen 제동만으로 충분한 경우 (T_max_regen 크기 > required)
-            if SoC >= 1.0: # 배터리 완충
+        ## case 1 : 가속 상황
+        if(T_bsg >= 0): # T_req_crank >= T_eng, 모터 동력도 필요
+            if(T_bsg > T_max_bsg): # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
+                T_bsg = T_max_bsg
+                T_eng = np.clip(T_req_crank - T_bsg, 0.0, T_max_eng) # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
+            # else : 그대로
+        else: # T_bsg < 0, 감속 OR 회생 제동 상황
+            if SoC >= 0.98: # 배터리 완충 -> 회생제동 불가
                 T_bsg = 0 # 회생제동 절대 X
-                T_brk = T_eng - T_req_crank
-            else: # 배터리 충전 가능
-                if(T_max_regen_shaft < (T_req_crank - T_eng)):
-                    T_bsg = T_req_crank - T_eng
-                    T_brk = 0
-                # motor regen 제동으로는 부족한 경우
-                else:
-                    T_bsg = T_max_regen_shaft
-                    T_brk = (T_eng + T_bsg) - T_req_crank
+                T_brk = -T_bsg
+            elif(np.abs(T_bsg) >= np.abs(T_max_reg)): # 회생제동으로는 부족한 경우
+                T_brk = -(T_bsg - T_max_reg)
+                T_bsg = T_max_reg
 
-        ## case 2. 가속 상황
-        else: # T_req >= 0
-            T_brk = 0 # brake 사용할 필요 X
-
-            # 4. Compute BSG torque requirement
-            T_bsg = T_req_crank - T_eng
-
-            if(T_bsg > 0): # 배터리 소모
-                if(T_bsg > T_max_bsg_shaft): # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
-                    T_bsg = T_max_bsg_shaft
-                    T_eng = T_req_crank - T_bsg # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
-                #else : do nothing 
-            else: # T_bsg < 0, 회생제동, 충전
-                if SoC >= 1.0: # 배터리 완충 (충전 불가)
-                   T_bsg = 0
-                   T_eng = T_req_crank
-                else:  # 충전 가능
-                    if(T_bsg < T_max_regen_shaft): # BSG 충전 역토크의 최대치를 넘어가는 경우
-                        T_bsg = T_max_regen_shaft
-                        T_brk = T_bsg + T_eng - T_req_crank
-                    #else : do nothing
+        def crank_to_motor(T_crank):
+            tau = self.car_config.tau_belt
+            eta = self.car_config.eta_belt
+            return (T_crank / (tau*eta) if T_crank >= 0
+                    else T_crank *  (tau*eta))
+        
+        T_bsg_shaft = crank_to_motor(T_bsg) # 크랭크축 -> 모터축으로 변환
 
         # 5. Enforce engine on/off switching constraints:
         ## TODO 엔진토크가 0보다 커지면 engine ON / 2.5초내로 engine의 on off를 바꾸는건 불가능함 (있으면 좋은 것)
@@ -371,7 +373,7 @@ class HEV(gym.Env):
         ## engine off limit을 주거나 안주거나 적용을 선택할 수 있도록 -> 학습 양상을 보고 넣을지 결정.
         ## engine을 키면 한N(~3)초 정도는 다시 토크를 0 으로 설정하는건 불가능하게 제약 필요 **
 
-        return T_eng, T_bsg, T_brk
+        return T_eng, T_bsg_shaft, T_brk
 
 
     #------------------------- Step function -------------------------- #
@@ -395,6 +397,7 @@ class HEV(gym.Env):
         n_gear = self.gear_number(prev_v_veh)
 
         # 기어 결정 이후 request torque 계산
+        # T_req = "최종적으로 바퀴에 걸려야하는 토크"
         T_req = self.req_T_calculation(prev_v_veh, current_v_veh, n_gear, self.step_size)
 
         #-------------------------------- 2. HCU phase -------------------------------- #
@@ -403,7 +406,11 @@ class HEV(gym.Env):
         ratio = action # action unpack (확장 가능)
 
         # T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos)
-        T_eng, T_bsg, T_brk = self.power_split_HCU(ratio, SoC_t0, T_req, prev_w_eng)
+        # 모든 토크는 본인의 축 기준!!
+        # T_eng -> crankshaft, T_bsg -> motor shaft
+        T_eng, T_bsg, T_brk = self.power_split_HCU(ratio, SoC_t0, T_req, prev_w_eng, n_gear)
+        
+        # to fit dimension
         if (type(T_eng) == np.ndarray):
             T_eng = T_eng[0]
         if (type(T_bsg) == np.ndarray):
