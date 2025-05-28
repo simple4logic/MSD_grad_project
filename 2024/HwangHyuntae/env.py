@@ -61,7 +61,9 @@ class HEV(gym.Env):
         self.reward = None
         self.done = False
 
-
+        # torque slew rate limit
+        self.engine_ramp_rate = 150.0 # N·m/s // allowable engine torque change per second
+        self.prev_T_eng = 0.0 # prev step engine torque
 
     #------------------------- space limitation ------------------------ #
         self.observation_space = gym.spaces.Box(
@@ -150,6 +152,21 @@ class HEV(gym.Env):
         }
         return tau_gear[n_gear]
     
+    def get_engine_ramp_rate(self, v_veh: float) -> float:
+        """
+        현재 속도(v_veh, m/s)에 따른 엔진 토크 램프율(N·m/s) 반환.
+        WLTP 0→100 kph (0→27.78 m/s) 가속 3개 구간 기반.
+        """
+        if v_veh < 16.667: # 0 ~ 60 km/h
+            return 50.5
+        elif v_veh < 22.222: # 60 ~ 80 km/h
+            return 160.9
+        elif v_veh < 27.778: # 80 ~ 100 km/h
+            return 124.3
+        # 그 이상: 마지막 값 유지... 보통은 더 감소하는 것 같기도
+        else: ## TODO -> 거동이 올바른지 다시 확인
+            return 124.3 # N·m/s
+    
     # return slip angular speed
     # take gear number, w_eng, T_eng
     # engine <-> transmission slip speed
@@ -180,7 +197,7 @@ class HEV(gym.Env):
 
     ## efficiency of transmission
     def eta_transmission(self, n_gear, T_trans, w_trans):
-        ## TODO put eff map here
+        ## put eff map here to make result better
         eff = 0.95
         return eff
     
@@ -300,7 +317,9 @@ class HEV(gym.Env):
     # Define a function to split the power between the engine and the BSG
     # T_req_wheel : 최종적으로 바퀴에 걸려야하는 토크
     # n_gear : 현재 속도에 대응하는 기어
-    def power_split_HCU(self, ratio, SoC, T_req_wheel, w_eng, n_gear):
+    # w_eng : 현재 엔진 속도 (rad/s)
+    # v_veh : 현재 속도 (m/s)
+    def power_split_HCU(self, ratio, SoC, T_req_wheel, w_eng, v_veh, n_gear):
         #** T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos) **#
         # T_req_wheel = T_req_crank * (gear ratio * tau_fdr) * eff        
 
@@ -332,14 +351,21 @@ class HEV(gym.Env):
         T_max_eng = self.get_engine_max_torque(w_eng)   # 크랭크축, positive
 
         # 5. Clip the ratio to the realistic range [0, 1]
-        real_ratio = np.clip(ratio, 0, 1)
-        T_eng = T_max_eng * ratio # eng torque 결정
+        clipped_ratio = np.clip(ratio, 0, 1)
+        T_eng = T_max_eng * clipped_ratio # eng torque 결정
 
-        # 3. T_eng 계산 (Soc 상태 고려)
+        # 6. T_eng 계산 (Soc 상태 고려)
         if SoC < 0.2:
-            T_eng = T_max_eng # 일부로 max로 넣어서, soc를 회생제동 시킴 -> 충전
-        else:
-            T_eng = T_max_eng * real_ratio
+            T_eng = T_max_eng # 만약 SoC가 20% 이하라면 action 무시하고 엔진을 최대 토크로 사용
+
+        # 7. Torque slew rate limit
+        # T_eng -> 이전 토크 대비 delta_T 만큼만 바뀔 수 있음
+        delta_T = self.get_engine_ramp_rate(v_veh) * self.step_size # N·m/s
+        T_eng = float(np.clip(
+            T_eng, 
+            self.prev_T_eng - delta_T,
+            self.prev_T_eng + delta_T))
+        self.prev_T_eng = T_eng # 현재 토크 저장 (다음 step에 이전 토크로 사용 예정)
 
         # ------------------------- torque split cases -------------------------- #
         T_bsg = T_req_crank - T_eng
@@ -366,12 +392,6 @@ class HEV(gym.Env):
                     else T_crank *  (tau*eta))
         
         T_bsg_shaft = crank_to_motor(T_bsg) # 크랭크축 -> 모터축으로 변환
-
-        # 5. Enforce engine on/off switching constraints:
-        ## TODO 엔진토크가 0보다 커지면 engine ON / 2.5초내로 engine의 on off를 바꾸는건 불가능함 (있으면 좋은 것)
-        ## idle RPM 이상으로는 나오도록 토크가 걸려야함
-        ## engine off limit을 주거나 안주거나 적용을 선택할 수 있도록 -> 학습 양상을 보고 넣을지 결정.
-        ## engine을 키면 한N(~3)초 정도는 다시 토크를 0 으로 설정하는건 불가능하게 제약 필요 **
 
         return T_eng, T_bsg_shaft, T_brk
 
@@ -408,7 +428,7 @@ class HEV(gym.Env):
         # T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos)
         # 모든 토크는 본인의 축 기준!!
         # T_eng -> crankshaft, T_bsg -> motor shaft
-        T_eng, T_bsg, T_brk = self.power_split_HCU(ratio, SoC_t0, T_req, prev_w_eng, n_gear)
+        T_eng, T_bsg, T_brk = self.power_split_HCU(ratio, SoC_t0, T_req, prev_w_eng, prev_v_veh, n_gear)
         
         # to fit dimension
         if (type(T_eng) == np.ndarray):
@@ -424,7 +444,6 @@ class HEV(gym.Env):
         # 새로운 state에 대해서 reward를 계산
         soc_reward = - ((abs(self.soc_base - SoC_t1))**2)*10 # 멀어질 수록 더 -가 커짐
         fuel_reward = - fuel_dot_t1*100 # 클수록 안좋음
-        # TODO : reward는 -1 ~ 1 사이로 -> 이게 가장 중요
         total_reward = 1 + soc_reward + fuel_reward # 원하는 target에 따라서 tuning 할 수 있음 reward 에 배치
 
         #----------------------------- state update phase ------------------------ #
