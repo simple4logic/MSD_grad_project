@@ -125,7 +125,7 @@ if __name__ == "__main__":
     eps_chkpt_cb = EpisodeCheckpointCallback(
         save_freq_episodes=args.checkpoint_freq,
         save_path=chkpt_dir,
-        name_prefix="sac_hev_modified",
+        name_prefix="sac_hev",
         save_replay_buffer=True
     )
 

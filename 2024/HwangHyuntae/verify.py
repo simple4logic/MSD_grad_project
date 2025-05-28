@@ -39,7 +39,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    chkpt_dir = os.path.join(".", "checkpoints", "model")
+    chkpt_dir = os.path.join(".", "checkpoints_new", "model")
     if args.target_eps != 0:
         latest_eps = args.target_eps
     else:

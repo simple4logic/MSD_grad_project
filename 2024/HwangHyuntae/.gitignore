@@ -5,6 +5,8 @@ wltp_1Hz.csv
 __pycache__/
 *.zip
 *.json
+*.pkl
 assets/
 issues.md
-
+WindowsPowerShell/
+vehicle_map/

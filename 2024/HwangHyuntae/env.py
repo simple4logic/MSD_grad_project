@@ -61,8 +61,7 @@ class HEV(gym.Env):
         self.reward = None
         self.done = False
 
-        # torque slew rate limit
-        self.engine_ramp_rate = 150.0 # N·m/s // allowable engine torque change per second
+        # for torque slew rate limit
         self.prev_T_eng = 0.0 # prev step engine torque
 
     #------------------------- space limitation ------------------------ #
