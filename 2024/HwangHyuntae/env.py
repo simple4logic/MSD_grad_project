@@ -25,8 +25,9 @@ class MQ4: ## car_config
     Mass = 1869         # Vehicle mass (kg) *checked!
     wheel_R = 0.36865   # Wheel radius (m)   P235/65R17  *checked!
     Area_front = 3.2205 # Frontal area, H*W = 1.695 * 1.9 (m^2) *checked!
-    tau_belt = 1        # belt ratio
-    eta_belt = 0.95     # belt efficiency motorshaft -> crankshaft
+    tau_belt = 2        # belt ratio btw bsg and engine *checked!
+    # S. J. Boyd, "Hybrid Electric Vehicle Control Strategy Based on Power Loss Calculations," Master of Science Thesis, Virginia Polytechnic Institute and State University, Blacksburg, VA, USA, 2006.
+    eta_belt = 0.95     # belt efficiency motorshaft -> crankshaft // assumed!
     tau_fdr = 3.510     # final drive ratio *checked!
     # -> Kia America, “2023 Sorento HEV Specifications,” Kia Media. [Online]. Available: https://www.kiamedia.com/us/en/models/sorento-hev/2023/specifications. [Accessed: May 22, 2025]
     battery_cap = 1.5   # capacity of the battery (kWh) *checked!
@@ -452,11 +453,11 @@ class HEV(gym.Env):
         #--------------------------------- for debugging ------------------------ #
         info = {
             "time"                  : self.time,            # Current time
-            "ratio"                 : ratio,               # Current gear
+            "ratio"                 : ratio,                # Current gear
             "T_req"                 : float(T_req),         # Requested torque
             "T_eng"                 : float(T_eng),         # Engine torque
             "T_bsg"                 : float(T_bsg),         # BSG torque
-            "SoC"                   : float(SoC_t1),    # 이번 스텝 시작 시의 SoC (%)
+            "SoC"                   : float(SoC_t1),        # 이번 스텝 시작 시의 SoC (%)
             "prev_w_eng"            : float(prev_w_eng),    # 이번 스텝에서 사용한 w_eng
             "T_eng_max"             : float(self.get_engine_max_torque(prev_w_eng)),    # 이번 스텝에서의 max torque
             "soc_reward"            : float(soc_reward),
