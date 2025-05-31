@@ -33,7 +33,7 @@ class MQ4: ## car_config
     battery_cap = 1.5   # capacity of the battery (kWh) *checked!
     w_stall = 40.8      # minimum engine speed not to stall // rad/s
     w_idle = 83.775804  # speed without giving any power // rad/s (ref - 800 RPM) *checked!
-    # -> “Idle (engine),” Wikipedia. [Online]. Available: https://en.wikipedia.org/wiki/Idle_(engine). [Accessed: May 22, 2025].
+    # M. A. Fard, M. Yousefi, and G. Aggarwal, “Sustainable Hybrid Vehicle Idle Speed Control Using PID and Fuzzy Logic,” in Proc. IEEE Smart World Congress 2023: IoT for Sustainable Smart Cities, Portsmouth, United Kingdom, 2023, pp. 1–5.
 
 # **wheel diameter = P235/65R17 -> (235*0.65*2+17*25.4) = 737.3mm, wheel radius = 737.3mm /1000 /2 = 0.36865m
 
@@ -156,6 +156,7 @@ class HEV(gym.Env):
         """
         현재 속도(v_veh, m/s)에 따른 엔진 토크 램프율(N·m/s) 반환.
         WLTP 0→100 kph (0→27.78 m/s) 가속 3개 구간 기반.
+        (0 -> 100 km/h 데이터를 기반으로 램프율 계산)
         """
         if v_veh < 16.667: # 0 ~ 60 km/h
             return 50.5
@@ -347,7 +348,7 @@ class HEV(gym.Env):
 
         # 4. get all max torque @ crankshaft        
         T_max_bsg =  to_crank(T_max_bsg_shaft)   # 크랭크축, positive
-        T_max_reg =  to_crank(T_max_regen_shaft) # 크랭크축, negative
+        T_max_reg =  to_crank(T_max_regen_shaft) # 크랭크축, negative(regen)
         T_max_eng = self.get_engine_max_torque(w_eng)   # 크랭크축, positive
 
         # 5. Clip the ratio to the realistic range [0, 1]
