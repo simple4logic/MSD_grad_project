@@ -3,6 +3,7 @@ import json
 import os
 import matplotlib.pyplot as plt
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="SAC으로 HEV 학습을 시작하거나 재개합니다."
@@ -27,18 +28,20 @@ def parse_args():
     )
     return parser.parse_args()
 
-def plot_results(test_name="wltp", specific_name = None, only_reward=False):
+
+def plot_results(test_name="wltp", target_eps=0, specific_name=None, only_reward=False):
     if specific_name is not None:
         json_name = specific_name
     else:
-        json_name = f"results_{test_name}.json"
+        json_name = f"results_{test_name}_{target_eps}.json"
     save_path = os.path.join("json_data", json_name)
 
     # JSON 파일 읽기
     with open(save_path, "r") as f:
         data = json.load(f)
 
-    last_episode_start = max(i for i, entry in enumerate(data) if entry["time"] == 0)
+    last_episode_start = max(
+        i for i, entry in enumerate(data) if entry["time"] == 0)
     data = data[last_episode_start:]
 
     # 각 키에 해당하는 값을 리스트로 추출합니다.
@@ -90,7 +93,8 @@ def plot_results(test_name="wltp", specific_name = None, only_reward=False):
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
 
-    plt.title(f"Result: T_eng, T_bsg and SoC vs Time  |  Total Reward: {total_reward_sum:.2f}")
+    plt.title(
+        f"Result: T_eng, T_bsg and SoC vs Time  |  Total Reward: {total_reward_sum:.2f}")
     plt.grid(True)
     plt.show()
 

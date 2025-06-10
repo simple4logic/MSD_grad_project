@@ -15,6 +15,7 @@ class EpisodeCheckpointCallback(BaseCallback):
     매 N 에피소드마다 모델(.zip)과 replay buffer(.pkl)를 저장합니다.
     파일명: {name_prefix}_{episode}_eps(.zip/.pkl)
     """
+
     def __init__(
         self,
         save_freq_episodes: int,
@@ -45,13 +46,15 @@ class EpisodeCheckpointCallback(BaseCallback):
                         model_path = os.path.join(
                             self.save_path,
                             "model",
-                            f"{self.name_prefix}_{self._episode_count}_eps" # .zip model 저장
+                            # .zip model 저장
+                            f"{self.name_prefix}_{self._episode_count}_eps"
                         )
                         self.model.save(model_path)
                         if self.save_replay_buffer:
                             buf_path = os.path.join(
                                 self.save_path,
-                                f"{self.name_prefix}_replay_buffer_{self._episode_count}_eps" # .pkl buffer 저장
+                                # .pkl buffer 저장
+                                f"{self.name_prefix}_replay_buffer_{self._episode_count}_eps"
                             )
                             self.model.save_replay_buffer(buf_path)
         return True
@@ -79,7 +82,7 @@ def parse_args():
         help="몇 에피소드마다 체크포인트를 저장할지"
     )
     parser.add_argument(
-        "--episodes",
+        "--episodes", "--eps",
         type=int,
         default=5000,
         help="처음부터 학습할 총 에피소드 수"
@@ -99,9 +102,9 @@ if __name__ == "__main__":
     os.makedirs(chkpt_dir, exist_ok=True)
 
     # 하이퍼파라미터 (depend on the test cycle)
-    start_time    = 0
-    step_size     = 1
-    stop_time     = 1800
+    start_time = 0
+    step_size = 1
+    stop_time = 1800
 
     if args.resume:
         episodes_to_train = args.extra_episodes or args.episodes
@@ -121,7 +124,7 @@ if __name__ == "__main__":
 
     # callback configuration
     progress_cb = TqdmProgressBarCallback(total_timesteps=total_timesteps)
-    info_cb     = SaveInfoCallback(log_path="json_data/final_episode_info.json")
+    info_cb = SaveInfoCallback(log_path="json_data/final_episode_info.json")
     eps_chkpt_cb = EpisodeCheckpointCallback(
         save_freq_episodes=args.checkpoint_freq,
         save_path=chkpt_dir,
@@ -135,14 +138,15 @@ if __name__ == "__main__":
         all_files = glob.glob(pattern)
         if not all_files:
             raise FileNotFoundError(f"No checkpoint found in {chkpt_dir}")
+
         def eps_from_path(p):
             name = os.path.basename(p)
             return int(name.split("_")[-2])
         latest_file = max(all_files, key=eps_from_path)
-        latest_eps  = eps_from_path(latest_file)
-        eps_chkpt_cb._episode_count = latest_eps # 콜백에 에피소드 수 업데이트
+        latest_eps = eps_from_path(latest_file)
+        eps_chkpt_cb._episode_count = latest_eps  # 콜백에 에피소드 수 업데이트
 
-        model_file  = latest_file
+        model_file = latest_file
         buffer_file = os.path.join(
             chkpt_dir,
             f"sac_hev_replay_buffer_{latest_eps}_eps"
