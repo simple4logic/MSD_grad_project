@@ -283,14 +283,12 @@ class HEV(gym.Env):
         # eta_motor != 0 이라는 전제
 
         # 3. Battery Model
-        root = self.V_oc(SoC)**2 - 4 * self.R_0(SoC) * \
-            P_bsg  # verify root >= 0
+        root = self.V_oc(SoC)**2 - 4 * self.R_0(SoC) * P_bsg  # verify root >= 0
         I_t = (self.V_oc(SoC) - np.sqrt(root if root >= 0 else 0)) / \
             (2 * self.R_0(SoC))
         # C_nom = Ah이기 때문에 분자도 A * hour 로 통일시켜줌
         battey_voltage = 270  # Voltage
-        DIFF = ((self.step_size / 3600) * battey_voltage *
-                (I_t + car.I_aux)) / (car.battery_cap * 1000)
+        DIFF = ((self.step_size / 3600) * battey_voltage * (I_t + car.I_aux)) / (car.battery_cap * 1000)
         SoC -= DIFF  # Wh / Wh -> %
 
         # # 4. Torque Converter Model
@@ -322,9 +320,9 @@ class HEV(gym.Env):
 
         # 필요 토크 계산
         T_wheel = car.Mass * a_veh * car.wheel_R + F_resist * car.wheel_R
-        T_req = T_wheel / (self.gear_ratio(n_gear) * car.tau_fdr)
+        # T_req = T_wheel / (self.gear_ratio(n_gear) * car.tau_fdr)
 
-        return T_req
+        return T_wheel
 
     # Define a function to split the power between the engine and the BSG
     # T_req_wheel : 최종적으로 바퀴에 걸려야하는 토크
@@ -334,12 +332,12 @@ class HEV(gym.Env):
 
     def power_split_HCU(self, ratio, SoC, T_req_wheel, w_eng, v_veh, n_gear):
         ########## for debugging ##########
-        # if SoC < 0.5:
+        # if SoC < 0.4:
         #     ratio = 1
         # elif SoC > 0.8:
         #     ratio = 0
         # else:
-        #     ratio = 0.5
+        #     ratio = 0.1
         ###################################
         # ** T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos) **#
         # T_req_wheel = T_req_crank * (gear ratio * tau_fdr) * eff

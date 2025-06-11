@@ -50,7 +50,7 @@ def plot_results(test_name="wltp", target_eps=0, specific_name=None, only_reward
     # T_req = [entry["T_req"] for entry in data]
     T_req_eng_shaft = [entry["T_req_eng_shaft"] for entry in data]
     T_eng = [entry["T_eng"] for entry in data]
-    # T_bsg = [entry["T_bsg"] for entry in data]
+    T_bsg_motor_shaft = [entry["T_bsg"] for entry in data]
     T_brk = [entry["T_brk"] for entry in data]
     T_bsg_eng_shaft = [entry["T_bsg_eng_shaft"] for entry in data]
     action = [entry["ratio"] for entry in data]
@@ -76,9 +76,10 @@ def plot_results(test_name="wltp", target_eps=0, specific_name=None, only_reward
     # 왼쪽 y축: T_eng와 T_bsg 플롯
     ax1.plot(times, T_eng, label="T_eng", color="blue")
     ax1.plot(times, T_bsg_eng_shaft, label="T_bsg", color="purple")
+    # ax1.plot(times, T_bsg_motor_shaft, label="T_bsg_motor_shaft", color="grey")
     ax1.plot(times, T_req_eng_shaft, label="T_req", color="green")
-    ax1.plot(times, total_list, label="should be zero", color="orange")
-    ax1.plot(times, T_brk, label="brake torque", color="brown")
+    # ax1.plot(times, total_list, label="should be zero", color="orange")
+    # ax1.plot(times, T_brk, label="brake torque", color="brown")
     # plt.plot(times, T_eng_max, label="T_eng_max", color="red")
     # plt.plot(times, prev_w_eng, label="prev_w_eng", color="green")
     # plt.plot(times, soc_reward, label="soc_reward", color="blue")
