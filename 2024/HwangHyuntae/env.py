@@ -333,6 +333,14 @@ class HEV(gym.Env):
     # v_veh : 현재 속도 (m/s)
 
     def power_split_HCU(self, ratio, SoC, T_req_wheel, w_eng, v_veh, n_gear):
+        ########## for debugging ##########
+        # if SoC < 0.5:
+        #     ratio = 1
+        # elif SoC > 0.8:
+        #     ratio = 0
+        # else:
+        #     ratio = 0.5
+        ###################################
         # ** T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos) **#
         # T_req_wheel = T_req_crank * (gear ratio * tau_fdr) * eff
 
@@ -388,41 +396,41 @@ class HEV(gym.Env):
         if (T_req_eng_shaft < 0):
             # motor regen 제동만으로 충분한 경우 (T_max_regen 크기 > required)
             if SoC >= 1.0:  # 배터리 완충
-                T_bsg = 0  # 회생제동 절대 X
+                T_bsg_eng_shaft = 0  # 회생제동 절대 X
                 T_brk = T_eng - T_req_eng_shaft
             else:  # 배터리 충전 가능
                 # 제동으로 해결이 가능한 경우
                 if (np.abs(T_max_regen_eng_shaft) > np.abs(T_req_eng_shaft - T_eng)):
-                    T_bsg = T_req_eng_shaft - T_eng
+                    T_bsg_eng_shaft = T_req_eng_shaft - T_eng
                     T_brk = 0
                 # motor regen 제동으로는 부족한 경우
                 else:
-                    T_bsg = T_max_regen_eng_shaft
-                    T_brk = (T_eng + T_bsg) - T_req_eng_shaft
+                    T_bsg_eng_shaft = T_max_regen_eng_shaft
+                    T_brk = (T_eng + T_bsg_eng_shaft) - T_req_eng_shaft
 
         # case 2. 가속 상황
         else:  # T_req >= 0
             T_brk = 0  # brake 사용할 필요 X
 
             # 4. Compute BSG torque requirement
-            T_bsg = T_req_eng_shaft - T_eng
+            T_bsg_eng_shaft = T_req_eng_shaft - T_eng
 
-            if (T_bsg > 0):  # 배터리 소모
-                if (T_bsg > T_max_bsg_eng_shaft):  # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
-                    T_bsg = T_max_bsg_eng_shaft
+            if (T_bsg_eng_shaft > 0):  # 배터리 소모
+                if (T_bsg_eng_shaft > T_max_bsg_eng_shaft):  # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
+                    T_bsg_eng_shaft = T_max_bsg_eng_shaft
                     # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
-                    T_eng = T_req_eng_shaft - T_bsg
+                    T_eng = T_req_eng_shaft - T_bsg_eng_shaft
                 # else : do nothing
                 # -> T_bsg = T_req_crank - T_eng
 
             else:  # T_bsg < 0, 회생제동, 충전
                 if SoC >= 1.0:  # 배터리 완충 (충전 불가)
-                    T_bsg = 0
+                    T_bsg_eng_shaft = 0
                     T_eng = T_req_eng_shaft
                 else:  # 충전 가능
-                    if (np.abs(T_bsg) > np.abs(T_max_regen_eng_shaft)):  # BSG 충전 역토크의 최대치를 넘어가는 경우
-                        T_bsg = T_max_regen_eng_shaft
-                        T_brk = (T_bsg + T_eng) - T_req_eng_shaft
+                    if (np.abs(T_bsg_eng_shaft) > np.abs(T_max_regen_eng_shaft)):  # BSG 충전 역토크의 최대치를 넘어가는 경우
+                        T_bsg_eng_shaft = T_max_regen_eng_shaft
+                        T_brk = (T_bsg_eng_shaft + T_eng) - T_req_eng_shaft
 
         def from_eng_shaft_to_motor(T_crank):
             tau = self.car_config.tau_belt
@@ -430,9 +438,9 @@ class HEV(gym.Env):
             return (T_crank / (tau*eta) if T_crank >= 0
                     else T_crank * (tau*eta))
 
-        T_bsg_motor_shaft = from_eng_shaft_to_motor(T_bsg)  # 크랭크축 -> 모터축으로 변환
+        T_bsg_motor_shaft = from_eng_shaft_to_motor(T_bsg_eng_shaft)  # 크랭크축 -> 모터축으로 변환
 
-        return T_eng, T_bsg_motor_shaft, T_brk
+        return T_eng, T_bsg_motor_shaft, T_brk, T_req_eng_shaft, T_bsg_eng_shaft
 
     # ------------------------- Step function -------------------------- #
     # action을 넣어주면 해당 action에 따라 1 time step만큼 모델을 돌림
@@ -468,7 +476,7 @@ class HEV(gym.Env):
         # T_req = T_eng(pos) + T_bsg(neg, pos) - T_brk(pos)
         # 모든 토크는 본인의 축 기준!!
         # T_eng -> crankshaft, T_bsg -> motor shaft
-        T_eng, T_bsg, T_brk = self.power_split_HCU(
+        T_eng, T_bsg, T_brk, T_req_eng_shaft, T_bsg_eng_shaft = self.power_split_HCU(
             ratio, SoC_t0, T_req, prev_w_eng, prev_v_veh, n_gear)
 
         # to fit dimension
@@ -501,6 +509,9 @@ class HEV(gym.Env):
             "T_req": float(T_req),         # Requested torque
             "T_eng": float(T_eng),         # Engine torque
             "T_bsg": float(T_bsg),         # BSG torque
+            "T_brk": float(T_brk),         # BSG torque
+            "T_req_eng_shaft": float(T_req_eng_shaft),         # BSG torque
+            "T_bsg_eng_shaft": float(T_bsg_eng_shaft),         # BSG torque
             "SoC": float(SoC_t1),        # 이번 스텝 시작 시의 SoC (%)
             "prev_w_eng": float(prev_w_eng),    # 이번 스텝에서 사용한 w_eng
             # 이번 스텝에서의 max torque

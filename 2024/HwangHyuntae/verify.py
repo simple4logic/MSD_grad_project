@@ -40,7 +40,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    chkpt_dir = os.path.join(".", "checkpoints_noramp", "model")
+    chkpt_dir = os.path.join(".", "checkpoints_last", "model")
     if args.target_eps != 0:
         latest_eps = args.target_eps
     else:
@@ -92,8 +92,11 @@ if __name__ == "__main__":
             "ratio"                 : info.get("ratio", None).item(), # 혼자 nparray라서
             "SoC"                   : info.get("SoC", None),
             "T_req"                 : info.get("T_req", None),
+            "T_req_eng_shaft"       : info.get("T_req_eng_shaft", None),
+            "T_bsg_eng_shaft"       : info.get("T_bsg_eng_shaft", None),
             "T_eng"                 : info.get("T_eng", None),
             "T_bsg"                 : info.get("T_bsg", None),
+            "T_brk"                 : info.get("T_brk", None),
             "T_eng_max"             : info.get("T_eng_max", None),
             "prev_w_eng"            : info.get("prev_w_eng", None),
             "soc_reward"            : info.get("soc_reward", None),
