@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument(
         "--target-eps", "--eps",
         type=int,
-        default="0",
+        default="500",
         help="choose which episode to test"
     )
     parser.add_argument(

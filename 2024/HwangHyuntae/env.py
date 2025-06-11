@@ -343,24 +343,24 @@ class HEV(gym.Env):
         # 1. calculate T_req_crank from T_req_wheel
         # 최종적으로 바퀴에 걸려야하는 토크 -> 크랭크 축이 내야하는 토크
         if T_req_wheel >= 0:
-            T_req_crank = T_req_wheel / (tau_total * eta_trans)
+            T_req_eng_shaft = T_req_wheel / (tau_total * eta_trans)
         else:
-            T_req_crank = T_req_wheel * eta_trans / tau_total
+            T_req_eng_shaft = T_req_wheel * eta_trans / tau_total
 
         # 2. Compute maximum motor torque from current w_eng(rad/s)
         w_bsg = car.tau_belt * w_eng
-        T_max_bsg_shaft = self.get_motor_max_torque(w_bsg)   # 모터축, positive
-        T_max_regen_shaft = self.get_motor_max_break(w_bsg)  # 모터축, negative
+        T_max_bsg_motor_shaft = self.get_motor_max_torque(w_bsg)   # 모터축, positive
+        T_max_regen_motor_shaft = self.get_motor_max_break(w_bsg)  # 모터축, negative
 
         # 3. convert max torque from motor shaft to crankshaft
         # 모터축 -> 엔진축(크랭크축)으로 변환. 나중에 합치기 위해서
-        def to_crank(T_m):
+        def to_eng_shaft(T_m):
             return T_m * car.tau_belt * car.eta_belt if T_m >= 0 \
                 else T_m / (car.tau_belt * car.eta_belt)
 
         # 4. get all max torque @ crankshaft
-        T_max_bsg = to_crank(T_max_bsg_shaft)   # 크랭크축, positive
-        T_max_reg = to_crank(T_max_regen_shaft)  # 크랭크축, negative(regen)
+        T_max_bsg_eng_shaft = to_eng_shaft(T_max_bsg_motor_shaft)   # 크랭크축, positive
+        T_max_regen_eng_shaft = to_eng_shaft(T_max_regen_motor_shaft)  # 크랭크축, negative(regen)
         T_max_eng = self.get_engine_max_torque(w_eng)   # 크랭크축, positive
 
         # 5. Clip the ratio to the realistic range [0, 1]
@@ -385,54 +385,54 @@ class HEV(gym.Env):
         T_brk = 0  # brake torque 초기화
 
         # case 1 : 제동 상황
-        if (T_req_crank < 0):
+        if (T_req_eng_shaft < 0):
             # motor regen 제동만으로 충분한 경우 (T_max_regen 크기 > required)
             if SoC >= 1.0:  # 배터리 완충
                 T_bsg = 0  # 회생제동 절대 X
-                T_brk = T_eng - T_req_crank
+                T_brk = T_eng - T_req_eng_shaft
             else:  # 배터리 충전 가능
                 # 제동으로 해결이 가능한 경우
-                if (np.abs(T_max_regen_shaft) > np.abs(T_req_crank - T_eng)):
-                    T_bsg = T_req_crank - T_eng
+                if (np.abs(T_max_regen_eng_shaft) > np.abs(T_req_eng_shaft - T_eng)):
+                    T_bsg = T_req_eng_shaft - T_eng
                     T_brk = 0
                 # motor regen 제동으로는 부족한 경우
                 else:
-                    T_bsg = T_max_regen_shaft
-                    T_brk = (T_eng + T_bsg) - T_req_crank
+                    T_bsg = T_max_regen_eng_shaft
+                    T_brk = (T_eng + T_bsg) - T_req_eng_shaft
 
         # case 2. 가속 상황
         else:  # T_req >= 0
             T_brk = 0  # brake 사용할 필요 X
 
             # 4. Compute BSG torque requirement
-            T_bsg = T_req_crank - T_eng
+            T_bsg = T_req_eng_shaft - T_eng
 
             if (T_bsg > 0):  # 배터리 소모
-                if (T_bsg > T_max_bsg_shaft):  # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
-                    T_bsg = T_max_bsg_shaft
+                if (T_bsg > T_max_bsg_eng_shaft):  # BSG 토크가 낼 수 있는 최대치 넘어가는 경우
+                    T_bsg = T_max_bsg_eng_shaft
                     # BSG를 max 만큼 끌어쓰고, 나머지는 T_eng으로 다시 채움 (T_req를 bsg max + eng max로 못할 수는 없음)
-                    T_eng = T_req_crank - T_bsg
+                    T_eng = T_req_eng_shaft - T_bsg
                 # else : do nothing
                 # -> T_bsg = T_req_crank - T_eng
 
             else:  # T_bsg < 0, 회생제동, 충전
                 if SoC >= 1.0:  # 배터리 완충 (충전 불가)
                     T_bsg = 0
-                    T_eng = T_req_crank
+                    T_eng = T_req_eng_shaft
                 else:  # 충전 가능
-                    if (np.abs(T_bsg) > np.abs(T_max_regen_shaft)):  # BSG 충전 역토크의 최대치를 넘어가는 경우
-                        T_bsg = T_max_regen_shaft
-                        T_brk = (T_bsg + T_eng) - T_req_crank
+                    if (np.abs(T_bsg) > np.abs(T_max_regen_eng_shaft)):  # BSG 충전 역토크의 최대치를 넘어가는 경우
+                        T_bsg = T_max_regen_eng_shaft
+                        T_brk = (T_bsg + T_eng) - T_req_eng_shaft
 
-        def crank_to_motor(T_crank):
+        def from_eng_shaft_to_motor(T_crank):
             tau = self.car_config.tau_belt
             eta = self.car_config.eta_belt
             return (T_crank / (tau*eta) if T_crank >= 0
                     else T_crank * (tau*eta))
 
-        T_bsg_shaft = crank_to_motor(T_bsg)  # 크랭크축 -> 모터축으로 변환
+        T_bsg_motor_shaft = from_eng_shaft_to_motor(T_bsg)  # 크랭크축 -> 모터축으로 변환
 
-        return T_eng, T_bsg_shaft, T_brk
+        return T_eng, T_bsg_motor_shaft, T_brk
 
     # ------------------------- Step function -------------------------- #
     # action을 넣어주면 해당 action에 따라 1 time step만큼 모델을 돌림
