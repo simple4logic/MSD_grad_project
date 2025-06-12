@@ -26,8 +26,8 @@ def analyze_total_rewards(directory: str, test_name: str = "wltp"):
     # 에피소드 번호 순으로 정렬
     episodes.sort(key=lambda x: x[0])
     
-    episode_nums = []
-    total_rewards = []
+    episode_nums = [0]
+    total_rewards = [0]
     
     # 각 JSON 파일을 읽고 total_reward 합산
     for ep, filepath in episodes:
@@ -173,7 +173,8 @@ def plot_multiple_soc(directory: str, test_name: str = "wltp", interval: int = 5
 
 
 if __name__ == "__main__":
-    # analyze_total_rewards(directory="json_data", test_name="udds")
+    analyze_total_rewards(directory="json_data_prev", test_name="wltp")
+    # analyze_total_rewards(directory="json_data", test_name="wltp")
     # analyze_soc_and_fuel_rewards(directory="json_data", test_name="wltp")
 
-    plot_multiple_soc(directory="json_data", test_name="udds", interval=5000)
+    # plot_multiple_soc(directory="json_data", test_name="udds", interval=5000)
